@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — Municipal GIS Encroachment Surveillance</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg-primary: #0a0e1a;
+            --bg-secondary: #111827;
+            --bg-card: #1a2235;
+            --bg-input: #0f1520;
+            --accent-blue: #3b82f6;
+            --accent-cyan: #06b6d4;
+            --accent-red: #ef4444;
+            --accent-green: #22c55e;
+            --accent-amber: #f59e0b;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border-color: #1e2d45;
+            --border-active: #3b82f6;
+            --shadow-glow: 0 0 40px rgba(59,130,246,0.15);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Animated background grid */
+        body::before {
+            content: '';
+            position: fixed; inset: 0;
+            background-image:
+                linear-gradient(rgba(59,130,246,0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(59,130,246,0.04) 1px, transparent 1px);
+            background-size: 40px 40px;
+            animation: gridPan 20s linear infinite;
+        }
+
+        /* Glow orbs */
+        body::after {
+            content: '';
+            position: fixed;
+            width: 600px; height: 600px;
+            background: radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 70%);
+            top: -200px; left: -200px;
+            animation: orbFloat 8s ease-in-out infinite alternate;
+            pointer-events: none;
+        }
+
+        .orb2 {
+            position: fixed;
+            width: 400px; height: 400px;
+            background: radial-gradient(circle, rgba(6,182,212,0.06) 0%, transparent 70%);
+            bottom: -150px; right: -150px;
+            animation: orbFloat2 10s ease-in-out infinite alternate;
+            pointer-events: none;
+        }
+
+        @keyframes gridPan { from { background-position: 0 0; } to { background-position: 40px 40px; } }
+        @keyframes orbFloat { from { transform: translate(0,0) scale(1); } to { transform: translate(60px,40px) scale(1.1); } }
+        @keyframes orbFloat2 { from { transform: translate(0,0); } to { transform: translate(-40px,-30px); } }
+
+        .login-wrapper {
+            position: relative; z-index: 10;
+            width: 100%; max-width: 440px;
+            padding: 20px;
+        }
+
+        /* Brand header */
+        .brand-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .brand-icon {
+            width: 72px; height: 72px;
+            background: linear-gradient(135deg, #1d4ed8, #0891b2);
+            border-radius: 18px;
+            display: flex; align-items: center; justify-content: center;
+            margin: 0 auto 16px;
+            box-shadow: 0 0 0 1px rgba(59,130,246,0.3), 0 8px 32px rgba(59,130,246,0.3);
+            animation: iconPulse 3s ease-in-out infinite;
+        }
+
+        @keyframes iconPulse {
+            0%, 100% { box-shadow: 0 0 0 1px rgba(59,130,246,0.3), 0 8px 32px rgba(59,130,246,0.3); }
+            50% { box-shadow: 0 0 0 1px rgba(59,130,246,0.5), 0 8px 48px rgba(59,130,246,0.5); }
+        }
+
+        .brand-icon i { font-size: 32px; color: #fff; }
+
+        .brand-header h1 {
+            font-size: 20px; font-weight: 700; color: var(--text-primary);
+            letter-spacing: -0.02em;
+        }
+
+        .brand-header p {
+            font-size: 13px; color: var(--text-secondary); margin-top: 4px;
+        }
+
+        /* Login Card */
+        .login-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 36px;
+            box-shadow: var(--shadow-glow), 0 24px 64px rgba(0,0,0,0.5);
+            backdrop-filter: blur(20px);
+        }
+
+        .card-title {
+            font-size: 22px; font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+
+        .card-subtitle {
+            font-size: 13px; color: var(--text-secondary);
+            margin-bottom: 28px;
+        }
+
+        /* Alert messages */
+        .alert {
+            display: flex; align-items: center; gap: 10px;
+            padding: 12px 16px;
+            border-radius: 10px;
+            font-size: 13px;
+            margin-bottom: 20px;
+            border: 1px solid;
+        }
+
+        .alert-error {
+            background: rgba(239,68,68,0.1);
+            border-color: rgba(239,68,68,0.3);
+            color: #fca5a5;
+        }
+
+        .alert-success {
+            background: rgba(34,197,94,0.1);
+            border-color: rgba(34,197,94,0.3);
+            color: #86efac;
+        }
+
+        .alert-warning {
+            background: rgba(245,158,11,0.1);
+            border-color: rgba(245,158,11,0.3);
+            color: #fcd34d;
+        }
+
+        .alert i { font-size: 15px; flex-shrink: 0; }
+
+        /* Form */
+        .form-group {
+            margin-bottom: 18px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px; font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase; letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .input-wrap {
+            position: relative;
+        }
+
+        .input-icon {
+            position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+            color: var(--text-muted); font-size: 14px;
+            pointer-events: none;
+            transition: color 0.2s;
+        }
+
+        .form-input {
+            width: 100%;
+            background: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 12px 14px 12px 40px;
+            font-size: 14px; font-family: 'Inter', sans-serif;
+            color: var(--text-primary);
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .form-input:focus {
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+        }
+
+        .form-input:focus + .input-icon,
+        .input-wrap:focus-within .input-icon {
+            color: var(--accent-blue);
+        }
+
+        .form-input::placeholder { color: var(--text-muted); }
+
+        /* Password toggle */
+        .pwd-toggle {
+            position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+            background: none; border: none; cursor: pointer;
+            color: var(--text-muted); font-size: 14px;
+            transition: color 0.2s; padding: 4px;
+        }
+
+        .pwd-toggle:hover { color: var(--text-secondary); }
+
+        .pwd-input { padding-right: 44px; }
+
+        /* Remember row */
+        .remember-row {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 24px;
+        }
+
+        .checkbox-label {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 13px; color: var(--text-secondary); cursor: pointer;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            width: 15px; height: 15px; accent-color: var(--accent-blue); cursor: pointer;
+        }
+
+        /* Login Button */
+        .btn-login {
+            width: 100%;
+            background: linear-gradient(135deg, #2563eb, #0891b2);
+            color: #fff;
+            border: none; border-radius: 10px;
+            padding: 14px;
+            font-size: 15px; font-weight: 600;
+            font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            box-shadow: 0 4px 20px rgba(37,99,235,0.4);
+        }
+
+        .btn-login:hover:not(:disabled) {
+            background: linear-gradient(135deg, #1d4ed8, #0e7490);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 28px rgba(37,99,235,0.5);
+        }
+
+        .btn-login:active { transform: translateY(0); }
+
+        .btn-login:disabled {
+            opacity: 0.65; cursor: not-allowed; transform: none;
+        }
+
+        .btn-login .spinner {
+            display: none;
+            width: 16px; height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Default credentials hint */
+        .default-creds {
+            margin-top: 24px;
+            padding: 14px;
+            background: rgba(6,182,212,0.06);
+            border: 1px solid rgba(6,182,212,0.15);
+            border-radius: 10px;
+        }
+
+        .default-creds p {
+            font-size: 11px; color: var(--text-muted);
+            text-align: center; margin-bottom: 8px; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 0.05em;
+        }
+
+        .cred-row {
+            display: flex; gap: 8px;
+        }
+
+        .cred-item {
+            flex: 1; text-align: center;
+            background: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: 8px; padding: 8px;
+            cursor: pointer; transition: border-color 0.2s;
+        }
+
+        .cred-item:hover { border-color: var(--accent-cyan); }
+
+        .cred-item .role {
+            font-size: 10px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.05em;
+            color: var(--accent-cyan); margin-bottom: 4px;
+        }
+
+        .cred-item .login-info {
+            font-size: 11px; color: var(--text-secondary); font-family: monospace;
+            line-height: 1.5;
+        }
+
+        /* Footer */
+        .login-footer {
+            text-align: center; margin-top: 20px;
+            font-size: 11px; color: var(--text-muted);
+        }
+
+        .login-footer span { color: var(--accent-cyan); }
+
+        /* Responsive */
+        @media (max-width: 480px) {
+            .login-card { padding: 24px 20px; }
+            .cred-row { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+<div class="orb2"></div>
+
+<div class="login-wrapper">
+    <!-- Brand -->
+    <div class="brand-header">
+        <div class="brand-icon">
+            <i class="fa-solid fa-building-shield"></i>
+        </div>
+        <h1>Municipal GIS Surveillance</h1>
+        <p>Land Encroachment Detection System</p>
+    </div>
+
+    <!-- Card -->
+    <div class="login-card">
+        <h2 class="card-title">Officer Sign In</h2>
+        <p class="card-subtitle">Authorized personnel only. All access is logged.</p>
+
+        {% if error %}
+        <div class="alert alert-error">
+            <i class="fa-solid fa-circle-exclamation"></i>
+            <span>{{ error }}</span>
+        </div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('login_page') }}" id="loginForm" novalidate>
+            <!-- Identifier -->
+            <div class="form-group">
+                <label class="form-label" for="identifier">Email or Username</label>
+                <div class="input-wrap">
+                    <input
+                        type="text" id="identifier" name="identifier"
+                        class="form-input" placeholder="admin@municipal.gov or admin"
+                        autocomplete="username" required
+                        value="{{ request.form.get('identifier', '') }}"
+                    >
+                    <i class="fa-solid fa-user input-icon"></i>
+                </div>
+            </div>
+
+            <!-- Password -->
+            <div class="form-group">
+                <label class="form-label" for="password">Password</label>
+                <div class="input-wrap">
+                    <input
+                        type="password" id="password" name="password"
+                        class="form-input pwd-input" placeholder="Enter your password"
+                        autocomplete="current-password" required
+                    >
+                    <i class="fa-solid fa-lock input-icon"></i>
+                    <button type="button" class="pwd-toggle" id="pwdToggle" tabindex="-1" aria-label="Show/hide password">
+                        <i class="fa-regular fa-eye" id="eyeIcon"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Remember -->
+            <div class="remember-row">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="remember" id="remember">
+                    Keep me signed in
+                </label>
+            </div>
+
+            <!-- Submit -->
+            <button type="submit" class="btn-login" id="loginBtn">
+                <span class="spinner" id="spinner"></span>
+                <i class="fa-solid fa-right-to-bracket" id="loginIcon"></i>
+                <span id="loginBtnText">Sign In to System</span>
+            </button>
+        </form>
+
+        <!-- Default credentials hint -->
+        <div class="default-creds">
+            <p><i class="fa-solid fa-key"></i> &nbsp; Default Credentials (click to fill)</p>
+            <div class="cred-row">
+                <div class="cred-item" onclick="fillCreds('admin','Admin@1234')">
+                    <div class="role">Admin</div>
+                    <div class="login-info">admin<br>Admin@1234</div>
+                </div>
+                <div class="cred-item" onclick="fillCreds('surveyor','Survey@1234')">
+                    <div class="role">Officer</div>
+                    <div class="login-info">surveyor<br>Survey@1234</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="login-footer">
+        Secured by <span>Municipal Cyber-Physical Infrastructure Division</span>
+    </div>
+    <div style="text-align:center;margin-top:14px;font-size:13px;color:#64748b">
+        New to the system?
+        <a href="{{ url_for('signup_page') }}" style="color:#22d3ee;font-weight:600;text-decoration:none">
+            Create an account
+        </a>
+    </div>
+</div>
+
+<script>
+    // Password toggle
+    const pwdField = document.getElementById('password');
+    const eyeIcon  = document.getElementById('eyeIcon');
+    document.getElementById('pwdToggle').addEventListener('click', () => {
+        const isText = pwdField.type === 'text';
+        pwdField.type = isText ? 'password' : 'text';
+        eyeIcon.className = isText ? 'fa-regular fa-eye' : 'fa-regular fa-eye-slash';
+    });
+
+    // Loading state on submit
+    document.getElementById('loginForm').addEventListener('submit', function(e) {
+        const id  = document.getElementById('identifier').value.trim();
+        const pwd = document.getElementById('password').value;
+        if (!id || !pwd) { e.preventDefault(); return; }
+
+        const btn = document.getElementById('loginBtn');
+        btn.disabled = true;
+        document.getElementById('spinner').style.display = 'block';
+        document.getElementById('loginIcon').style.display = 'none';
+        document.getElementById('loginBtnText').textContent = 'Authenticating…';
+    });
+
+    // Quick fill credentials
+    function fillCreds(username, password) {
+        document.getElementById('identifier').value = username;
+        document.getElementById('password').value   = password;
+        document.getElementById('identifier').focus();
+    }
+</script>
+</body>
+</html>
