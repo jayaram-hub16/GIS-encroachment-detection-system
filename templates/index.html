@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Municipal GIS Encroachment Surveillance System</title>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Leaflet Draw Plugin for Interactive Surveyor Tools -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="dark-theme">
+
+    <!-- Top Navigation Header -->
+    <header class="app-header">
+        <div class="brand-section">
+            <div class="muni-crest">
+                <i class="fa-solid fa-building-shield"></i>
+            </div>
+            <div>
+                <h1 class="app-title">MUNICIPAL GIS SURVEILLANCE & ENCROACHMENT DETECTOR</h1>
+                <p class="app-subtitle">Directorate of Survey, Town Planning & Public Land Protection &bull; Sector 7 Ward Command</p>
+            </div>
+        </div>
+
+        <div class="header-search-bar">
+            <i class="fa-solid fa-satellite text-cyan"></i>
+            <input type="text" id="input-map-search" placeholder="Search any city, ward, or coordinates (e.g. Bangalore, 12.925, 77.59)..." />
+            <button id="btn-map-search" class="btn btn-sm btn-primary" title="Fly to location"><i class="fa-solid fa-location-arrow"></i></button>
+        </div>
+
+        <div class="header-actions">
+            <button id="btn-scan" class="btn btn-primary pulse-btn" title="Execute real-time GIS spatial mismatch audit">
+                <i class="fa-solid fa-satellite-dish"></i> Run Real-Time Scan
+            </button>
+            <button id="btn-draw-mode" class="btn btn-secondary" title="Activate polygon drawing tool to test arbitrary boundaries">
+                <i class="fa-solid fa-draw-polygon"></i> Draw Test Boundary
+            </button>
+            <button id="btn-export-audit" class="btn btn-outline" title="Export Full Municipal Audit Dossier">
+                <i class="fa-solid fa-file-invoice"></i> Audit Dossier
+            </button>
+            <button id="btn-reset" class="btn btn-outline" title="Reset Cadastre to baseline state">
+                <i class="fa-solid fa-rotate-left"></i>
+            </button>
+            <a href="/dashboard" class="btn btn-outline" title="Open Management Dashboard" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
+                <i class="fa-solid fa-gauge-high"></i> Dashboard
+            </a>
+            <a href="/logout" class="btn" title="Logout" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.25);color:#f87171;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:600;">
+                <i class="fa-solid fa-right-from-bracket"></i> Logout{% if user %} ({{ user.username }}){% endif %}
+            </a>
+        </div>
+    </header>
+
+    <!-- KPI Metric Ribbon -->
+    <section class="kpi-ribbon">
+        <div class="kpi-card" id="kpi-parcels">
+            <div class="kpi-icon"><i class="fa-solid fa-map-location-dot"></i></div>
+            <div class="kpi-content">
+                <span class="kpi-label">Registered Parcels</span>
+                <span class="kpi-val" id="val-parcels">8</span>
+                <span class="kpi-sub">Cadastral Survey Records</span>
+            </div>
+        </div>
+
+        <div class="kpi-card alert-card" id="kpi-flags">
+            <div class="kpi-icon alert-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+            <div class="kpi-content">
+                <span class="kpi-label">Active Encroachments</span>
+                <span class="kpi-val" id="val-flags">5</span>
+                <span class="kpi-sub">Spatial & Zoning Violations</span>
+            </div>
+        </div>
+
+        <div class="kpi-card" id="kpi-area">
+            <div class="kpi-icon"><i class="fa-solid fa-vector-square"></i></div>
+            <div class="kpi-content">
+                <span class="kpi-label">Encroached Land</span>
+                <span class="kpi-val" id="val-area">0.00 m²</span>
+                <span class="kpi-sub">Public & Disputed Ground</span>
+            </div>
+        </div>
+
+        <div class="kpi-card warning-card" id="kpi-critical">
+            <div class="kpi-icon"><i class="fa-solid fa-shield-virus"></i></div>
+            <div class="kpi-content">
+                <span class="kpi-label">Critical / High Risk</span>
+                <span class="kpi-val" id="val-critical">0</span>
+                <span class="kpi-sub">Roads & Eco Buffers</span>
+            </div>
+        </div>
+
+        <div class="kpi-card" id="kpi-penalties">
+            <div class="kpi-icon"><i class="fa-solid fa-indian-rupee-sign"></i></div>
+            <div class="kpi-content">
+                <span class="kpi-label">Assessed Penalties</span>
+                <span class="kpi-val" id="val-penalties">₹0.00</span>
+                <span class="kpi-sub">Statutory Recovery Pool</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Main Workspace -->
+    <main class="main-workspace">
+
+        <!-- Interactive GIS Map Viewport -->
+        <div class="map-container">
+            <div id="gis-map"></div>
+
+            <!-- Floating Map Layer Controls -->
+            <div class="map-floating-overlay">
+                <div class="layer-control-panel">
+                    <span class="panel-header"><i class="fa-solid fa-layer-group"></i> GIS LAYERS</span>
+                    <label class="layer-toggle">
+                        <input type="checkbox" id="chk-cadastre" checked>
+                        <span class="toggle-box"></span>
+                        <span class="layer-text"><i class="fa-solid fa-border-all text-blue"></i> Cadastral Parcels</span>
+                    </label>
+                    <label class="layer-toggle">
+                        <input type="checkbox" id="chk-structures" checked>
+                        <span class="toggle-box"></span>
+                        <span class="layer-text"><i class="fa-solid fa-building text-cyan"></i> Satellite Structures</span>
+                    </label>
+                    <label class="layer-toggle">
+                        <input type="checkbox" id="chk-encroachments" checked>
+                        <span class="toggle-box"></span>
+                        <span class="layer-text"><i class="fa-solid fa-triangle-exclamation text-crimson"></i> Encroachment Flags</span>
+                    </label>
+                    <label class="layer-toggle">
+                        <input type="checkbox" id="chk-buffer" checked>
+                        <span class="toggle-box"></span>
+                        <span class="layer-text"><i class="fa-solid fa-water text-green"></i> 30m Water Eco Buffer</span>
+                    </label>
+                    <div class="basemap-switch">
+                        <span><i class="fa-brands fa-google"></i> Imagery & Basemap:</span>
+                        <select id="sel-basemap" class="form-select">
+                            <option value="google_hybrid" selected>Google Maps Hybrid (Satellite + Roads)</option>
+                            <option value="google_satellite">Google Maps Satellite (Sub-Meter Ortho)</option>
+                            <option value="google_streets">Google Maps Streets (Cartography)</option>
+                            <option value="google_terrain">Google Maps Terrain & Elevation</option>
+                            <option value="sentinel2">Sentinel-2 Cloudless (Copernicus Space Agency)</option>
+                            <option value="satellite">ESRI World Satellite Imagery</option>
+                            <option value="dark">Carto Dark Matter (High Contrast)</option>
+                            <option value="osm">OpenStreetMap Standard</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real-Time Satellite Telemetry Ribbon -->
+            <div class="map-telemetry-bar">
+                <span><i class="fa-solid fa-satellite text-cyan"></i> Sensor: <strong id="lbl-active-sensor">Google Satellite (Maxar/Airbus High-Res)</strong></span>
+                <span class="telemetry-divider">|</span>
+                <span><i class="fa-solid fa-crosshairs text-yellow"></i> GPS Cursor: <span id="lbl-cursor-lat">12.925200</span>° N, <span id="lbl-cursor-lon">77.591500</span>° E</span>
+                <span class="telemetry-divider">|</span>
+                <span><i class="fa-solid fa-magnifying-glass-plus text-green"></i> Zoom: <span id="lbl-map-zoom">17x</span></span>
+            </div>
+
+            <!-- Legend Overlay -->
+            <div class="map-legend">
+                <div class="legend-item"><span class="legend-color residential"></span> Residential</div>
+                <div class="legend-item"><span class="legend-color commercial"></span> Commercial</div>
+                <div class="legend-item"><span class="legend-color road"></span> Public Road</div>
+                <div class="legend-item"><span class="legend-color water"></span> Lake Reserve</div>
+                <div class="legend-item"><span class="legend-color agricultural"></span> Agricultural</div>
+                <div class="legend-item"><span class="legend-color violation"></span> Encroached Polygon</div>
+            </div>
+        </div>
+
+        <!-- Municipal Intelligence Drawer -->
+        <aside class="sidebar-drawer">
+            <!-- Tab Headers -->
+            <div class="tab-header">
+                <button class="tab-btn active" data-tab="tab-violations">
+                    <i class="fa-solid fa-list-check"></i> Violations (<span id="tab-count-violations">0</span>)
+                </button>
+                <button class="tab-btn" data-tab="tab-inspector">
+                    <i class="fa-solid fa-magnifying-glass-location"></i> Inspector
+                </button>
+                <button class="tab-btn" data-tab="tab-ai-lab">
+                    <i class="fa-solid fa-chart-line"></i> Spectral AI
+                </button>
+                <button class="tab-btn" data-tab="tab-cadastre">
+                    <i class="fa-solid fa-database"></i> Registry
+                </button>
+            </div>
+
+            <!-- Tab Content 1: Violations List -->
+            <div id="tab-violations" class="tab-pane active">
+                <div class="filter-bar">
+                    <select id="filter-severity" class="form-select">
+                        <option value="ALL">All Severities</option>
+                        <option value="CRITICAL">Critical Only</option>
+                        <option value="HIGH">High</option>
+                        <option value="MEDIUM">Medium</option>
+                        <option value="LOW">Low</option>
+                    </select>
+                    <select id="filter-type" class="form-select">
+                        <option value="ALL">All Types</option>
+                        <option value="GOVERNMENT_LAND_TRESPASS">Govt/Road Trespass</option>
+                        <option value="BOUNDARY_SPILLOVER">Boundary Spillover</option>
+                        <option value="WATERBODY_BUFFER_VIOLATION">Lake Buffer Infringement</option>
+                        <option value="UNAUTHORIZED_LAND_USE">Unauthorized Land Use</option>
+                    </select>
+                </div>
+
+                <div class="violations-list" id="violations-container">
+                    <!-- Populated dynamically via JS -->
+                    <div class="empty-state">
+                        <i class="fa-solid fa-spinner fa-spin"></i> Loading survey infractions...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab Content 2: Selected Flag / Dispute Inspector -->
+            <div id="tab-inspector" class="tab-pane">
+                <div id="inspector-empty" class="empty-state">
+                    <i class="fa-solid fa-hand-pointer"></i>
+                    <p>Click any encroachment polygon on the map or select an item from the Violations queue to inspect details.</p>
+                </div>
+
+                <div id="inspector-content" class="inspector-card" style="display: none;">
+                    <div class="inspector-header">
+                        <span id="insp-flag-id" class="badge-flag">ENC-000</span>
+                        <span id="insp-severity" class="badge-severity sev-critical">CRITICAL</span>
+                    </div>
+
+                    <h3 id="insp-type-title" class="insp-title">Violation Type</h3>
+
+                    <div class="dispute-parties">
+                        <div class="party-box violator">
+                            <span class="party-label"><i class="fa-solid fa-user-xmark"></i> Violator / Origin</span>
+                            <strong id="insp-violator-name">Unknown</strong>
+                            <small id="insp-violator-parcel">PARCEL-ID</small>
+                        </div>
+                        <div class="party-divider"><i class="fa-solid fa-arrow-right"></i></div>
+                        <div class="party-box affected">
+                            <span class="party-label"><i class="fa-solid fa-shield-halved"></i> Affected Land</span>
+                            <strong id="insp-affected-name">Municipal Land</strong>
+                            <small id="insp-affected-parcel">PARCEL-ID</small>
+                        </div>
+                    </div>
+
+                    <div class="metric-grid">
+                        <div class="metric-cell">
+                            <span class="metric-title">Encroached Area</span>
+                            <span id="insp-area" class="metric-num">0.0 m²</span>
+                        </div>
+                        <div class="metric-cell">
+                            <span class="metric-title">AI Confidence</span>
+                            <span id="insp-confidence" class="metric-num">95%</span>
+                        </div>
+                        <div class="metric-cell">
+                            <span class="metric-title">Zoning Status</span>
+                            <span id="insp-zoning" class="metric-num">Road</span>
+                        </div>
+                        <div class="metric-cell">
+                            <span class="metric-title">Estimated Penalty</span>
+                            <span id="insp-penalty" class="metric-num text-crimson">₹0</span>
+                        </div>
+                    </div>
+
+                    <div class="action-recommendation-box">
+                        <span class="box-label"><i class="fa-solid fa-gavel"></i> Statutory Recommendation</span>
+                        <p id="insp-recommendation">Action text...</p>
+                    </div>
+
+                    <div class="enforcement-toolbar">
+                        <div class="gmaps-actions-row">
+                            <a id="btn-open-gmaps" href="#" target="_blank" class="btn btn-gmaps" title="Open exact coordinates in Google Maps Satellite">
+                                <i class="fa-brands fa-google"></i> Google Maps
+                            </a>
+                            <a id="btn-open-streetview" href="#" target="_blank" class="btn btn-streetview" title="Launch Google Street View 360° at boundary">
+                                <i class="fa-solid fa-street-view"></i> Street View 360°
+                            </a>
+                        </div>
+                        <button id="btn-generate-notice" class="btn btn-warning btn-block">
+                            <i class="fa-solid fa-scale-balanced"></i> Generate Statutory Show-Cause Notice
+                        </button>
+                        <div class="status-action-row">
+                            <span>Update Status:</span>
+                            <select id="insp-status-select" class="form-select">
+                                <option value="DETECTED">DETECTED</option>
+                                <option value="NOTICE_SERVED">NOTICE_SERVED</option>
+                                <option value="UNDER_FIELD_SURVEY">UNDER_FIELD_SURVEY</option>
+                                <option value="LEGAL_PROCEEDING">LEGAL_PROCEEDING</option>
+                                <option value="REGULARIZED">REGULARIZED</option>
+                                <option value="RESOLVED">RESOLVED</option>
+                            </select>
+                            <button id="btn-save-status" class="btn btn-sm btn-outline">Update</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab Content 3: Spectral AI Remote Sensing Lab -->
+            <div id="tab-ai-lab" class="tab-pane">
+                <div class="ai-lab-header">
+                    <h4>Multi-Spectral Remote Sensing Classifier</h4>
+                    <p>Random Forest LULC Classification model using Sentinel-2/USGS optical & infrared bands.</p>
+                </div>
+
+                <div class="model-stats-box" id="model-metrics-box">
+                    <div class="model-stat-item">
+                        <span>Model Accuracy:</span>
+                        <strong id="ml-acc">98.4%</strong>
+                    </div>
+                    <div class="model-stat-item">
+                        <span>Estimators:</span>
+                        <strong>100 Trees</strong>
+                    </div>
+                </div>
+
+                <h5 class="section-title">Interactive Spectral Simulator</h5>
+                <p class="section-sub">Adjust reflectance bands to simulate real-time land cover classification:</p>
+
+                <div class="slider-group">
+                    <label>Red Band (0.665 µm): <span id="val-r">0.24</span></label>
+                    <input type="range" id="rng-r" min="0.01" max="0.70" step="0.01" value="0.24">
+                </div>
+                <div class="slider-group">
+                    <label>Green Band (0.560 µm): <span id="val-g">0.22</span></label>
+                    <input type="range" id="rng-g" min="0.01" max="0.70" step="0.01" value="0.22">
+                </div>
+                <div class="slider-group">
+                    <label>Blue Band (0.490 µm): <span id="val-b">0.20</span></label>
+                    <input type="range" id="rng-b" min="0.01" max="0.70" step="0.01" value="0.20">
+                </div>
+                <div class="slider-group">
+                    <label>NIR - Near Infrared (0.842 µm): <span id="val-nir">0.27</span></label>
+                    <input type="range" id="rng-nir" min="0.01" max="0.85" step="0.01" value="0.27">
+                </div>
+                <div class="slider-group">
+                    <label>SWIR - Shortwave IR (1.610 µm): <span id="val-swir">0.39</span></label>
+                    <input type="range" id="rng-swir" min="0.01" max="0.75" step="0.01" value="0.39">
+                </div>
+
+                <div class="indices-card">
+                    <div class="index-item">
+                        <span>NDVI (Vegetation)</span>
+                        <strong id="idx-ndvi">0.05</strong>
+                    </div>
+                    <div class="index-item">
+                        <span>NDBI (Built-Up)</span>
+                        <strong id="idx-ndbi" class="text-warning">0.18</strong>
+                    </div>
+                    <div class="index-item">
+                        <span>NDWI (Water)</span>
+                        <strong id="idx-ndwi">-0.10</strong>
+                    </div>
+                    <div class="index-item">
+                        <span>BSI (Bare Soil)</span>
+                        <strong id="idx-bsi">0.12</strong>
+                    </div>
+                </div>
+
+                <div class="ml-prediction-result">
+                    <span class="pred-label">Predicted Surface Class:</span>
+                    <h3 id="ml-predicted-class" class="text-cyan">BUILT_UP (Concrete/Rooftop)</h3>
+                    <div class="confidence-bar-wrap">
+                        <div id="ml-confidence-bar" class="confidence-bar" style="width: 92%;"></div>
+                    </div>
+                    <small>Confidence: <span id="ml-confidence-val">92.4%</span></small>
+                </div>
+            </div>
+
+            <!-- Tab Content 4: Cadastral Registry -->
+            <div id="tab-cadastre" class="tab-pane">
+                <div class="registry-search">
+                    <input type="text" id="input-search-parcel" class="form-input" placeholder="Search Survey # or Owner Name...">
+                </div>
+                <div class="parcels-table-wrap" id="parcels-table-container">
+                    <!-- Populated dynamically via JS -->
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <!-- Modal: Statutory Legal Notice Preview & Print -->
+    <div id="modal-notice" class="modal-overlay" style="display: none;">
+        <div class="modal-dialog notice-dialog">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-stamp"></i> STATUTORY MUNICIPAL NOTICE</h3>
+                <button class="modal-close" id="btn-close-notice">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="notice-document" id="printable-notice">
+                    <div class="notice-head">
+                        <div class="notice-crest"><i class="fa-solid fa-building-columns"></i></div>
+                        <h2>METRO CITY MUNICIPAL CORPORATION</h2>
+                        <h4>OFFICE OF THE CHIEF TOWN PLANNING & SURVEY OFFICER</h4>
+                        <p class="notice-meta">Statutory Enforcement Order under Section 248/321 of the Municipal Code</p>
+                    </div>
+
+                    <div class="notice-ref-row">
+                        <div><strong>Notice Ref:</strong> <span id="not-ref">MUNI-2026-000</span></div>
+                        <div><strong>Date:</strong> <span id="not-date">29-Sep-2026</span></div>
+                    </div>
+
+                    <div class="notice-addressee">
+                        <strong>TO:</strong><br>
+                        <span id="not-violator-name">Shri Ramesh Kumar</span><br>
+                        <span id="not-violator-parcel">Holding Parcel: PARCEL-RES-101 (Survey #101/A)</span><br>
+                        <span id="not-zone">Sector 7 Layout</span>
+                    </div>
+
+                    <div class="notice-subject">
+                        <strong>SUB:</strong> STATUTORY DEMOLITION & SHOW-CAUSE NOTICE FOR UNAUTHORIZED ENCROACHMENT OF PUBLIC / ADJACENT PROPERTY.
+                    </div>
+
+                    <div class="notice-text">
+                        <p id="not-statutory-order">Notice text...</p>
+                    </div>
+
+                    <table class="notice-summary-table">
+                        <tr>
+                            <th>Infringement Type:</th>
+                            <td id="not-type">Public Road Trespass</td>
+                        </tr>
+                        <tr>
+                            <th>Total Encroached Area:</th>
+                            <td id="not-area">24.5 m²</td>
+                        </tr>
+                        <tr>
+                            <th>Invaded Property:</th>
+                            <td id="not-affected">Municipal 80-Feet Arterial Road</td>
+                        </tr>
+                        <tr>
+                            <th>Geographic Coordinates:</th>
+                            <td id="not-coords">Lat: 12.9250° N, Lon: 77.5900° E</td>
+                        </tr>
+                        <tr>
+                            <th>Assessed Statutory Penalty:</th>
+                            <td id="not-penalty" class="text-crimson">₹1,45,000.00</td>
+                        </tr>
+                        <tr>
+                            <th>Compliance Period:</th>
+                            <td id="not-deadline">7 Days from date of service</td>
+                        </tr>
+                    </table>
+
+                    <div class="notice-signatures">
+                        <div class="qr-placeholder">
+                            <i class="fa-solid fa-qrcode fa-3x"></i>
+                            <small>DigiLocker Cadastral Verified</small>
+                        </div>
+                        <div class="officer-signature">
+                            <div class="sig-line"></div>
+                            <strong>(R. K. Sundaram, IAS)</strong><br>
+                            Chief Municipal Commissioner & Cadastral Authority<br>
+                            Metro City Municipal Corporation
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="btn-print-notice"><i class="fa-solid fa-print"></i> Print Official Order</button>
+                <button class="btn btn-secondary" id="btn-dismiss-notice">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Interactive Custom Polygon Overlap Result -->
+    <div id="modal-survey-result" class="modal-overlay" style="display: none;">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-crosshairs"></i> Real-Time Survey Boundary Analysis</h3>
+                <button class="modal-close" id="btn-close-survey-result">&times;</button>
+            </div>
+            <div class="modal-body" id="survey-result-body">
+                <!-- Populated dynamically -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="btn-done-survey-result">Acknowledge</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application JavaScript -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
