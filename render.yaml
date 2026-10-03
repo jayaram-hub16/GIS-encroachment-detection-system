@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: municipal-gis-system
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn run_app:app --workers=2 --timeout=120 --bind=0.0.0.0:$PORT
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true          # Render auto-generates a secure random value
+      - key: HTTPS
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: municipal-gis-db
+          property: connectionString
+      - key: PYTHONIOENCODING
+        value: "utf-8"
+
+databases:
+  - name: municipal-gis-db
+    databaseName: municipal_gis
+    user: gis_admin
+    plan: free
