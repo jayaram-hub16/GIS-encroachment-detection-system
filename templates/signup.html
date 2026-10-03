@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Account — Municipal GIS System</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg:      #0a0e1a;
+            --card:    #1a2235;
+            --input:   #0f1520;
+            --border:  #1e2d45;
+            --blue:    #3b82f6;
+            --cyan:    #06b6d4;
+            --green:   #22c55e;
+            --red:     #ef4444;
+            --text:    #f1f5f9;
+            --muted:   #94a3b8;
+            --dimmed:  #64748b;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            min-height: 100vh;
+            display: flex; align-items: center; justify-content: center;
+            overflow: hidden; position: relative;
+        }
+        body::before {
+            content: '';
+            position: fixed; inset: 0;
+            background-image:
+                linear-gradient(rgba(59,130,246,0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(59,130,246,0.04) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+        .orb {
+            position: fixed; border-radius: 50%; pointer-events: none;
+            background: radial-gradient(circle, rgba(59,130,246,0.07) 0%, transparent 70%);
+            width: 500px; height: 500px; top: -150px; right: -150px;
+        }
+        .wrapper {
+            position: relative; z-index: 10;
+            width: 100%; max-width: 480px; padding: 20px;
+        }
+        .brand {
+            text-align: center; margin-bottom: 28px;
+        }
+        .brand-icon {
+            width: 64px; height: 64px;
+            background: linear-gradient(135deg, #1d4ed8, #0891b2);
+            border-radius: 16px;
+            display: flex; align-items: center; justify-content: center;
+            margin: 0 auto 14px;
+            box-shadow: 0 0 0 1px rgba(59,130,246,0.3), 0 8px 30px rgba(59,130,246,0.3);
+        }
+        .brand-icon i { font-size: 28px; color: #fff; }
+        .brand h1 { font-size: 18px; font-weight: 700; color: var(--text); }
+        .brand p  { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 32px;
+            box-shadow: 0 0 40px rgba(59,130,246,0.1), 0 20px 60px rgba(0,0,0,0.5);
+        }
+        .card-title { font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+        .card-sub   { font-size: 12px; color: var(--muted); margin-bottom: 24px; }
+
+        .alert {
+            display: flex; align-items: flex-start; gap: 10px;
+            padding: 12px 14px; border-radius: 10px; font-size: 13px;
+            margin-bottom: 18px; border: 1px solid;
+        }
+        .alert-error   { background: rgba(239,68,68,0.09); border-color: rgba(239,68,68,0.25); color: #fca5a5; }
+        .alert-success { background: rgba(34,197,94,0.09); border-color: rgba(34,197,94,0.25); color: #86efac; }
+        .alert i { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group.full { grid-column: span 2; }
+        label {
+            display: block; font-size: 11px; font-weight: 600; color: var(--dimmed);
+            text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 7px;
+        }
+        .inp-wrap { position: relative; }
+        .inp-icon {
+            position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
+            color: var(--dimmed); font-size: 13px; pointer-events: none;
+        }
+        input {
+            width: 100%; background: var(--input); border: 1px solid var(--border);
+            border-radius: 9px; padding: 10px 12px 10px 38px;
+            font-size: 13px; font-family: 'Inter', sans-serif;
+            color: var(--text); outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(59,130,246,0.12); }
+        input::placeholder { color: var(--dimmed); }
+        .pwd-btn {
+            position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+            background: none; border: none; cursor: pointer;
+            color: var(--dimmed); font-size: 13px; padding: 4px;
+        }
+        .pwd-btn:hover { color: var(--muted); }
+        .pad-right { padding-right: 42px; }
+
+        /* Password strength */
+        .pwd-strength { margin-top: 6px; }
+        .strength-bar { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+        .strength-fill { height: 100%; border-radius: 2px; transition: width 0.3s, background 0.3s; width: 0%; }
+        .strength-label { font-size: 11px; color: var(--dimmed); margin-top: 4px; }
+
+        .terms { font-size: 12px; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
+
+        .btn-submit {
+            width: 100%; padding: 13px;
+            background: linear-gradient(135deg, #2563eb, #0891b2);
+            color: #fff; border: none; border-radius: 10px;
+            font-size: 14px; font-weight: 600; font-family: 'Inter', sans-serif;
+            cursor: pointer; transition: all 0.2s;
+            box-shadow: 0 4px 18px rgba(37,99,235,0.35);
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        .btn-submit:hover:not(:disabled) {
+            background: linear-gradient(135deg, #1d4ed8, #0e7490);
+            transform: translateY(-1px);
+        }
+        .btn-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+        .spinner { display: none; width: 15px; height: 15px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin .6s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .login-link {
+            text-align: center; margin-top: 20px;
+            font-size: 13px; color: var(--muted);
+        }
+        .login-link a { color: var(--cyan); font-weight: 600; }
+        .login-link a:hover { text-decoration: underline; }
+
+        /* Role info badge */
+        .role-note {
+            display: flex; align-items: center; gap: 8px;
+            padding: 10px 12px; background: rgba(6,182,212,0.06);
+            border: 1px solid rgba(6,182,212,0.15); border-radius: 8px;
+            font-size: 11px; color: var(--muted); margin-bottom: 18px;
+        }
+        .role-note i { color: var(--cyan); }
+
+        @media (max-width: 480px) {
+            .card { padding: 24px 18px; }
+            .form-row { grid-template-columns: 1fr; }
+            .form-group.full { grid-column: span 1; }
+        }
+    </style>
+</head>
+<body>
+<div class="orb"></div>
+
+<div class="wrapper">
+    <div class="brand">
+        <div class="brand-icon"><i class="fa-solid fa-building-shield"></i></div>
+        <h1>Municipal GIS Surveillance</h1>
+        <p>Land Encroachment Detection System</p>
+    </div>
+
+    <div class="card">
+        <h2 class="card-title">Create an Account</h2>
+        <p class="card-sub">Public access — view GIS data and encroachment records</p>
+
+        {% if error %}
+        <div class="alert alert-error">
+            <i class="fa-solid fa-circle-exclamation"></i>
+            <span>{{ error }}</span>
+        </div>
+        {% endif %}
+
+        {% if success %}
+        <div class="alert alert-success">
+            <i class="fa-solid fa-check-circle"></i>
+            <span>{{ success }} <a href="/login" style="color:#4ade80;font-weight:600;">Sign in &rarr;</a></span>
+        </div>
+        {% endif %}
+
+        <div class="role-note">
+            <i class="fa-solid fa-circle-info"></i>
+            <span>New accounts are created with <strong>Viewer</strong> access. Admins can upgrade roles from the admin panel.</span>
+        </div>
+
+        <form method="POST" action="{{ url_for('signup_page') }}" id="signupForm" novalidate>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="username">Username *</label>
+                    <div class="inp-wrap">
+                        <input type="text" id="username" name="username" required
+                               placeholder="e.g. jsmith"
+                               value="{{ request.form.get('username','') }}"
+                               autocomplete="username">
+                        <i class="fa-solid fa-user inp-icon"></i>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="full_name">Full Name</label>
+                    <div class="inp-wrap">
+                        <input type="text" id="full_name" name="full_name"
+                               placeholder="John Smith"
+                               value="{{ request.form.get('full_name','') }}"
+                               autocomplete="name">
+                        <i class="fa-solid fa-id-card inp-icon"></i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="email">Email Address *</label>
+                <div class="inp-wrap">
+                    <input type="email" id="email" name="email" required
+                           placeholder="you@example.com"
+                           value="{{ request.form.get('email','') }}"
+                           autocomplete="email">
+                    <i class="fa-solid fa-envelope inp-icon"></i>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password *</label>
+                <div class="inp-wrap">
+                    <input type="password" id="password" name="password" required
+                           placeholder="Min 8 chars, 1 uppercase, 1 number"
+                           class="pad-right" autocomplete="new-password"
+                           oninput="checkStrength(this.value)">
+                    <i class="fa-solid fa-lock inp-icon"></i>
+                    <button type="button" class="pwd-btn" onclick="togglePwd('password','eye1')">
+                        <i class="fa-regular fa-eye" id="eye1"></i>
+                    </button>
+                </div>
+                <div class="pwd-strength">
+                    <div class="strength-bar"><div class="strength-fill" id="strengthFill"></div></div>
+                    <div class="strength-label" id="strengthLabel">Enter a password</div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="confirm_password">Confirm Password *</label>
+                <div class="inp-wrap">
+                    <input type="password" id="confirm_password" name="confirm_password" required
+                           placeholder="Re-enter password"
+                           class="pad-right" autocomplete="new-password">
+                    <i class="fa-solid fa-lock inp-icon"></i>
+                    <button type="button" class="pwd-btn" onclick="togglePwd('confirm_password','eye2')">
+                        <i class="fa-regular fa-eye" id="eye2"></i>
+                    </button>
+                </div>
+            </div>
+
+            <p class="terms">
+                By creating an account you agree that your activity will be logged
+                for security purposes in accordance with the Municipal Data Protection Policy.
+            </p>
+
+            <button type="submit" class="btn-submit" id="submitBtn">
+                <span class="spinner" id="spinner"></span>
+                <i class="fa-solid fa-user-plus" id="submitIcon"></i>
+                <span id="submitText">Create Account</span>
+            </button>
+        </form>
+
+        <p class="login-link">
+            Already have an account? <a href="{{ url_for('login_page') }}">Sign in</a>
+        </p>
+    </div>
+</div>
+
+<script>
+function togglePwd(inputId, eyeId) {
+    const el  = document.getElementById(inputId);
+    const eye = document.getElementById(eyeId);
+    const isText = el.type === 'text';
+    el.type = isText ? 'password' : 'text';
+    eye.className = isText ? 'fa-regular fa-eye' : 'fa-regular fa-eye-slash';
+}
+
+function checkStrength(pwd) {
+    let score = 0;
+    if (pwd.length >= 8)              score++;
+    if (/[A-Z]/.test(pwd))           score++;
+    if (/[0-9]/.test(pwd))           score++;
+    if (/[^A-Za-z0-9]/.test(pwd))    score++;
+
+    const fill  = document.getElementById('strengthFill');
+    const label = document.getElementById('strengthLabel');
+    const colors = ['#ef4444','#f97316','#f59e0b','#22c55e'];
+    const labels = ['Too weak','Weak','Good','Strong'];
+    const widths = ['25%','50%','75%','100%'];
+
+    if (!pwd) {
+        fill.style.width = '0%'; label.textContent = 'Enter a password';
+        label.style.color = '#64748b'; return;
+    }
+    const i = Math.min(score - 1, 3);
+    fill.style.background = colors[i];
+    fill.style.width       = widths[i];
+    label.textContent      = labels[i];
+    label.style.color      = colors[i];
+}
+
+document.getElementById('signupForm').addEventListener('submit', function(e) {
+    const u  = document.getElementById('username').value.trim();
+    const em = document.getElementById('email').value.trim();
+    const p  = document.getElementById('password').value;
+    const c  = document.getElementById('confirm_password').value;
+    if (!u || !em || !p || !c) { e.preventDefault(); return; }
+
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    document.getElementById('spinner').style.display = 'block';
+    document.getElementById('submitIcon').style.display = 'none';
+    document.getElementById('submitText').textContent = 'Creating account…';
+});
+</script>
+</body>
+</html>
