@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Dashboard — Municipal GIS System</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <style>
+        /* USER-DASHBOARD-SPECIFIC OVERRIDES */
+        .role-badge {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 3px 10px; border-radius: 20px; font-size: 10px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.06em;
+            background: rgba(6,182,212,0.12); color: #22d3ee; border: 1px solid rgba(6,182,212,0.2);
+        }
+        .profile-card {
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            border-radius: 16px; padding: 24px;
+        }
+        .profile-avatar {
+            width: 56px; height: 56px;
+            background: linear-gradient(135deg, #1d4ed8, #0891b2);
+            border-radius: 14px; display: flex; align-items: center; justify-content: center;
+            font-size: 22px; font-weight: 800; color: #fff; margin-bottom: 14px;
+        }
+        .profile-name { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+        .profile-email { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+        .profile-meta { display: flex; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+        .profile-meta-item { font-size: 11px; color: var(--text-muted); }
+        .profile-meta-item strong { color: var(--text-secondary); }
+        .view-only-notice {
+            display: flex; align-items: center; gap: 10px;
+            padding: 12px 16px; background: rgba(245,158,11,0.07);
+            border: 1px solid rgba(245,158,11,0.2); border-radius: 10px;
+            font-size: 12px; color: #fcd34d; margin-bottom: 20px;
+        }
+        .view-only-notice i { flex-shrink: 0; }
+        .record-detail-panel {
+            position: fixed; right: 0; top: 0; bottom: 0; width: 380px;
+            background: var(--bg-secondary); border-left: 1px solid var(--border-color);
+            z-index: 300; overflow-y: auto; padding: 24px;
+            transform: translateX(100%); transition: transform 0.3s ease;
+        }
+        .record-detail-panel.open { transform: translateX(0); }
+        .detail-overlay {
+            display: none; position: fixed; inset: 0; z-index: 290;
+            background: rgba(0,0,0,0.4); backdrop-filter: blur(3px);
+        }
+        .detail-overlay.open { display: block; }
+        .detail-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+        .detail-header h3 { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+        .detail-row { margin-bottom: 14px; }
+        .detail-label { font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+        .detail-value { font-size: 13px; color: var(--text-secondary); }
+        .detail-value.highlight { color: var(--text-primary); font-weight: 600; }
+    </style>
+</head>
+<body class="dark-theme">
+
+<!-- ══════ SIDEBAR ══════ -->
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+        <div class="sidebar-icon"><i class="fa-solid fa-building-shield"></i></div>
+        <div>
+            <div class="sidebar-title">MuniGIS</div>
+            <div class="sidebar-sub">Encroachment System</div>
+        </div>
+        <button class="sidebar-close" id="sidebarClose"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+
+    <nav class="sidebar-nav">
+        <div class="nav-section-label">My Dashboard</div>
+        <a class="nav-item active" href="#" data-page="overview" onclick="showPage('overview',this)">
+            <i class="fa-solid fa-gauge-high"></i> Overview
+        </a>
+        <a class="nav-item" href="#" data-page="parcels" onclick="showPage('parcels',this)">
+            <i class="fa-solid fa-map-location-dot"></i> Land Parcels
+        </a>
+        <a class="nav-item" href="#" data-page="encroachments" onclick="showPage('encroachments',this)">
+            <i class="fa-solid fa-triangle-exclamation"></i> Encroachments
+        </a>
+        <a class="nav-item" href="#" data-page="profile" onclick="showPage('profile',this)">
+            <i class="fa-solid fa-user-circle"></i> My Profile
+        </a>
+        <div class="nav-section-label">Tools</div>
+        <a class="nav-item" href="/">
+            <i class="fa-solid fa-map"></i> Live GIS Map
+        </a>
+    </nav>
+
+    <div class="sidebar-footer">
+        <div class="user-badge">
+            <div class="user-avatar">{{ user.username[0]|upper }}</div>
+            <div>
+                <div class="user-name">{{ user.full_name or user.username }}</div>
+                <div class="user-role">Viewer</div>
+            </div>
+        </div>
+        <a href="{{ url_for('logout') }}" class="btn-logout" title="Logout">
+            <i class="fa-solid fa-right-from-bracket"></i>
+        </a>
+    </div>
+</aside>
+
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<!-- ══════ MAIN ══════ -->
+<main class="main-content">
+    <!-- Top Bar -->
+    <div class="topbar">
+        <div class="topbar-left">
+            <button class="menu-toggle" id="menuToggle"><i class="fa-solid fa-bars"></i></button>
+            <div class="page-breadcrumb">
+                <span id="breadcrumbText"><i class="fa-solid fa-gauge-high"></i> Overview</span>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <button class="topbar-btn" onclick="refreshCurrentPage()" title="Refresh">
+                <i class="fa-solid fa-arrows-rotate" id="refreshIcon"></i>
+            </button>
+            <a href="/" class="topbar-btn" title="GIS Map"><i class="fa-solid fa-map"></i></a>
+            <div class="topbar-user">
+                <div class="user-avatar-sm">{{ user.username[0]|upper }}</div>
+                <span>{{ user.username }}</span>
+                <span class="role-badge">Viewer</span>
+            </div>
+            <a href="{{ url_for('logout') }}" class="btn-logout-top">
+                <i class="fa-solid fa-right-from-bracket"></i> Logout
+            </a>
+        </div>
+    </div>
+
+    <!-- ── PAGE: OVERVIEW ── -->
+    <section class="page-section active" id="page-overview">
+        <div class="section-header">
+            <h2 class="section-title">Overview</h2>
+            <button class="btn-outline" onclick="refreshCurrentPage()">
+                <i class="fa-solid fa-arrows-rotate"></i> Refresh
+            </button>
+        </div>
+
+        <div class="view-only-notice">
+            <i class="fa-solid fa-eye"></i>
+            <span>You have <strong>View-Only</strong> access. To request elevated permissions, contact your administrator.</span>
+        </div>
+
+        <div class="kpi-grid" id="kpiGrid">
+            <div class="kpi-card">
+                <div class="kpi-icon blue"><i class="fa-solid fa-map-location-dot"></i></div>
+                <div class="kpi-body">
+                    <div class="kpi-label">Total Parcels</div>
+                    <div class="kpi-value" id="kpiParcels">—</div>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon red"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                <div class="kpi-body">
+                    <div class="kpi-label">Encroachments</div>
+                    <div class="kpi-value" id="kpiEnc">—</div>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon cyan"><i class="fa-solid fa-satellite-dish"></i></div>
+                <div class="kpi-body">
+                    <div class="kpi-label">GIS Flags (Live)</div>
+                    <div class="kpi-value" id="kpiGis">—</div>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon amber"><i class="fa-solid fa-chart-pie"></i></div>
+                <div class="kpi-body">
+                    <div class="kpi-label">Critical Violations</div>
+                    <div class="kpi-value" id="kpiCritical">—</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="overview-grid">
+            <div class="dash-card">
+                <div class="dash-card-header">
+                    <h3><i class="fa-solid fa-chart-pie"></i> Severity Breakdown</h3>
+                </div>
+                <div id="severityChart" class="sev-chart-wrap"></div>
+            </div>
+            <div class="dash-card">
+                <div class="dash-card-header">
+                    <h3><i class="fa-solid fa-clock-rotate-left"></i> Recent Parcels</h3>
+                    <button class="btn-sm-link" onclick="showPage('parcels',null)">View All</button>
+                </div>
+                <div id="recentParcels" class="recent-list"></div>
+            </div>
+            <div class="dash-card">
+                <div class="dash-card-header">
+                    <h3><i class="fa-solid fa-bell"></i> Recent Violations</h3>
+                    <button class="btn-sm-link" onclick="showPage('encroachments',null)">View All</button>
+                </div>
+                <div id="recentEnc" class="recent-list"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── PAGE: PARCELS (read-only) ── -->
+    <section class="page-section" id="page-parcels">
+        <div class="section-header">
+            <h2 class="section-title"><i class="fa-solid fa-map-location-dot"></i> Land Parcel Records</h2>
+            <!-- NO Add button for users -->
+        </div>
+
+        <div class="table-toolbar">
+            <div class="search-wrap">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" id="parcelSearch" placeholder="Search parcels…" oninput="debounce(loadParcels,350)()">
+            </div>
+            <select id="parcelLandUse" onchange="loadParcels()">
+                <option value="">All Land Uses</option>
+                <option value="RESIDENTIAL">Residential</option>
+                <option value="COMMERCIAL">Commercial</option>
+                <option value="INDUSTRIAL">Industrial</option>
+                <option value="AGRICULTURAL">Agricultural</option>
+                <option value="PUBLIC_UTILITY_ROAD">Road / Utility</option>
+                <option value="PUBLIC_PARK">Public Park</option>
+                <option value="GOVERNMENT_RESERVE">Government Reserve</option>
+                <option value="WATER_BODY">Water Body</option>
+            </select>
+            <select id="parcelOwnerType" onchange="loadParcels()">
+                <option value="">All Owner Types</option>
+                <option value="PRIVATE_CITIZEN">Private Citizen</option>
+                <option value="COMMERCIAL_ENTITY">Commercial Entity</option>
+                <option value="MUNICIPAL_CORPORATION">Municipal Corporation</option>
+                <option value="GOVERNMENT_REVENUE">Government Revenue</option>
+            </select>
+            <button class="btn-outline" onclick="loadParcels()">
+                <i class="fa-solid fa-arrows-rotate"></i> Refresh
+            </button>
+        </div>
+
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Parcel ID</th>
+                        <th>Survey No.</th>
+                        <th>Owner</th>
+                        <th>Land Use</th>
+                        <th>Area (m²)</th>
+                        <th>Zone</th>
+                        <th>Created</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody id="parcelTbody">
+                    <tr><td colspan="9" class="loading-row"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination" id="parcelPagination"></div>
+    </section>
+
+    <!-- ── PAGE: ENCROACHMENTS (read-only) ── -->
+    <section class="page-section" id="page-encroachments">
+        <div class="section-header">
+            <h2 class="section-title"><i class="fa-solid fa-triangle-exclamation"></i> Encroachment Records</h2>
+            <!-- NO Add button for users -->
+        </div>
+
+        <div class="table-toolbar">
+            <div class="search-wrap">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" id="encSearch" placeholder="Search violations…" oninput="debounce(loadEncroachments,350)()">
+            </div>
+            <select id="encSeverity" onchange="loadEncroachments()">
+                <option value="">All Severities</option>
+                <option value="CRITICAL">Critical</option>
+                <option value="HIGH">High</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="LOW">Low</option>
+            </select>
+            <select id="encStatus" onchange="loadEncroachments()">
+                <option value="">All Statuses</option>
+                <option value="DETECTED">Detected</option>
+                <option value="UNDER_REVIEW">Under Review</option>
+                <option value="NOTICE_ISSUED">Notice Issued</option>
+                <option value="RESOLVED">Resolved</option>
+            </select>
+            <button class="btn-outline" onclick="loadEncroachments()">
+                <i class="fa-solid fa-arrows-rotate"></i> Refresh
+            </button>
+        </div>
+
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Flag ID</th>
+                        <th>Type</th>
+                        <th>Severity</th>
+                        <th>Violator</th>
+                        <th>Area (m²)</th>
+                        <th>Penalty (₹)</th>
+                        <th>Status</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody id="encTbody">
+                    <tr><td colspan="9" class="loading-row"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination" id="encPagination"></div>
+    </section>
+
+    <!-- ── PAGE: PROFILE ── -->
+    <section class="page-section" id="page-profile">
+        <div class="section-header">
+            <h2 class="section-title"><i class="fa-solid fa-user-circle"></i> My Profile</h2>
+        </div>
+        <div style="max-width:480px">
+            <div class="profile-card">
+                <div class="profile-avatar">{{ user.username[0]|upper }}</div>
+                <div class="profile-name">{{ user.full_name or user.username }}</div>
+                <div class="profile-email">{{ user.email }}</div>
+                <div class="profile-meta">
+                    <div class="profile-meta-item">
+                        <strong>Username:</strong> {{ user.username }}
+                    </div>
+                    <div class="profile-meta-item">
+                        <strong>Role:</strong> <span class="role-badge">Viewer</span>
+                    </div>
+                    <div class="profile-meta-item">
+                        <strong>Last Login:</strong> <span id="lastLogin">—</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Change password form -->
+            <div class="dash-card" style="margin-top:16px;">
+                <div class="dash-card-header">
+                    <h3><i class="fa-solid fa-lock"></i> Change Password</h3>
+                </div>
+                <div style="padding:16px">
+                    <div class="form-group" style="margin-bottom:12px">
+                        <label class="form-label">New Password</label>
+                        <input class="form-input" type="password" id="newPwd" placeholder="Min 8 chars, 1 uppercase, 1 number">
+                    </div>
+                    <div class="form-group" style="margin-bottom:12px">
+                        <label class="form-label">Confirm New Password</label>
+                        <input class="form-input" type="password" id="confirmPwd" placeholder="Re-enter new password">
+                    </div>
+                    <div id="pwdAlert" style="display:none;margin-bottom:10px"></div>
+                    <button class="btn-primary btn-sm" onclick="changePassword()">
+                        <i class="fa-solid fa-key"></i> Update Password
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+</main>
+
+<!-- Record Detail Panel (slide-in) -->
+<div class="detail-overlay" id="detailOverlay" onclick="closeDetail()"></div>
+<div class="record-detail-panel" id="detailPanel">
+    <div class="detail-header">
+        <h3 id="detailTitle">Record Details</h3>
+        <button class="modal-close" onclick="closeDetail()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div id="detailBody"></div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+"use strict";
+
+// ── State ──
+let parcelPage = 1, encPage = 1;
+let currentUserId = null;
+
+// ── Init ──
+document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("menuToggle")?.addEventListener("click", openSidebar);
+    document.getElementById("sidebarClose")?.addEventListener("click", closeSidebar);
+    loadMe();
+    showPage("overview", document.querySelector(".nav-item[data-page='overview']"));
+});
+
+function openSidebar()  { document.getElementById("sidebar").classList.add("open"); document.getElementById("sidebarOverlay").classList.add("open"); }
+function closeSidebar() { document.getElementById("sidebar").classList.remove("open"); document.getElementById("sidebarOverlay").classList.remove("open"); }
+
+const PAGE_CFG = {
+    overview:      { icon:"fa-gauge-high",           label:"Overview" },
+    parcels:       { icon:"fa-map-location-dot",     label:"Land Parcels" },
+    encroachments: { icon:"fa-triangle-exclamation", label:"Encroachments" },
+    profile:       { icon:"fa-user-circle",          label:"My Profile" },
+};
+
+function showPage(id, el) {
+    document.querySelectorAll(".page-section").forEach(s => s.classList.remove("active"));
+    document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
+    const sec = document.getElementById(`page-${id}`);
+    if (sec) sec.classList.add("active");
+    if (el)  el.classList.add("active");
+    const cfg = PAGE_CFG[id] || {icon:"fa-circle", label:id};
+    document.getElementById("breadcrumbText").innerHTML = `<i class="fa-solid ${cfg.icon}"></i> ${cfg.label}`;
+    closeSidebar();
+    if (id === "overview")      loadOverview();
+    else if (id === "parcels")  { parcelPage = 1; loadParcels(); }
+    else if (id === "encroachments") { encPage = 1; loadEncroachments(); }
+}
+
+function refreshCurrentPage() {
+    const active = document.querySelector(".page-section.active");
+    if (!active) return;
+    const icon = document.getElementById("refreshIcon");
+    icon?.classList.add("spinning");
+    setTimeout(() => icon?.classList.remove("spinning"), 800);
+    showPage(active.id.replace("page-",""), null);
+}
+
+// ── Current user ──
+async function loadMe() {
+    try {
+        const r = await fetch("/api/me");
+        const d = await r.json();
+        if (d.status === "success") {
+            currentUserId = d.user.id;
+            const ll = document.getElementById("lastLogin");
+            if (ll) ll.textContent = d.user.last_login ? fmtDate(d.user.last_login) : "First login";
+        }
+    } catch {}
+}
+
+// ── Overview ──
+async function loadOverview() {
+    try {
+        const r = await fetch("/api/dashboard-stats");
+        const d = await r.json();
+        const db = d.db_stats || {}, gis = d.gis_stats || {};
+        setKpi("kpiParcels",  db.total_parcels ?? 0);
+        setKpi("kpiEnc",      db.total_encroachments ?? 0);
+        setKpi("kpiGis",      gis.total_flags ?? gis.total_encroachment_flags ?? 0);
+        setKpi("kpiCritical", db.severity_breakdown?.CRITICAL ?? 0);
+        renderSeverity(db.severity_breakdown || {});
+        renderRecentParcels(d.recent_parcels || []);
+        renderRecentEnc(d.recent_encroachments || []);
+    } catch(e) { console.error(e); }
+}
+
+function setKpi(id, v) { const el=document.getElementById(id); if(el) el.textContent=Number(v).toLocaleString(); }
+
+function renderSeverity(sev) {
+    const w = document.getElementById("severityChart"); if (!w) return;
+    const levels = ["CRITICAL","HIGH","MEDIUM","LOW"];
+    const max = Math.max(...levels.map(l => sev[l]||0), 1);
+    w.innerHTML = levels.map(l => {
+        const count = sev[l]||0, pct = Math.round((count/max)*100);
+        return `<div class="sev-bar-row">
+            <div class="sev-bar-label label-${l}">${l}</div>
+            <div class="sev-bar-track"><div class="sev-bar-fill sev-${l}" style="width:${pct}%"></div></div>
+            <div class="sev-bar-count label-${l}">${count}</div>
+        </div>`;
+    }).join("");
+}
+
+function renderRecentParcels(parcels) {
+    const el=document.getElementById("recentParcels"); if(!el) return;
+    if (!parcels.length) { el.innerHTML='<div class="empty-state"><i class="fa-solid fa-inbox"></i><br>No parcel records yet</div>'; return; }
+    el.innerHTML = parcels.map(p=>`
+    <div class="recent-item">
+        <div class="ri-icon ri-blue"><i class="fa-solid fa-map"></i></div>
+        <div class="ri-text">
+            <div class="ri-title">${esc(p.owner_name)}</div>
+            <div class="ri-sub">${esc(p.parcel_id)} · ${esc(p.registered_land_use)}</div>
+        </div>
+    </div>`).join("");
+}
+
+function renderRecentEnc(recs) {
+    const el=document.getElementById("recentEnc"); if(!el) return;
+    if (!recs.length) { el.innerHTML='<div class="empty-state"><i class="fa-solid fa-check-circle"></i><br>No violations</div>'; return; }
+    el.innerHTML = recs.map(r=>`
+    <div class="recent-item">
+        <div class="ri-icon ri-red"><i class="fa-solid fa-triangle-exclamation"></i></div>
+        <div class="ri-text">
+            <div class="ri-title">${esc(r.violator_name||"Unknown")}</div>
+            <div class="ri-sub">${esc(r.encroachment_type)} · ${severityBadge(r.severity)}</div>
+        </div>
+    </div>`).join("");
+}
+
+// ── Parcels (READ ONLY) ──
+async function loadParcels() {
+    const tbody = document.getElementById("parcelTbody");
+    tbody.innerHTML=`<tr><td colspan="9" class="loading-row"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</td></tr>`;
+    const params = new URLSearchParams({
+        page: parcelPage, per_page: 15,
+        search: document.getElementById("parcelSearch")?.value||"",
+        land_use: document.getElementById("parcelLandUse")?.value||"",
+        owner_type: document.getElementById("parcelOwnerType")?.value||"",
+    });
+    try {
+        const r = await fetch(`/api/parcels?${params}`);
+        const d = await r.json();
+        if (!d.parcels?.length) {
+            tbody.innerHTML=`<tr><td colspan="9" class="loading-row" style="color:var(--text-muted)"><i class="fa-solid fa-inbox"></i> No records found</td></tr>`;
+            document.getElementById("parcelPagination").innerHTML=""; return;
+        }
+        tbody.innerHTML = d.parcels.map(p=>`
+        <tr>
+            <td style="color:var(--text-muted);font-family:monospace">${p.id}</td>
+            <td style="color:var(--accent-cyan);font-family:monospace;font-size:11px">${esc(p.parcel_id)}</td>
+            <td>${esc(p.survey_number)}</td>
+            <td style="color:var(--text-primary);font-weight:500">${esc(p.owner_name)}</td>
+            <td>${landUseBadge(p.registered_land_use)}</td>
+            <td style="font-family:monospace">${(p.area_sqm||0).toLocaleString()}</td>
+            <td>${esc(p.zone_name||"—")}</td>
+            <td style="color:var(--text-muted);font-size:11px">${fmtDate(p.created_at)}</td>
+            <td>
+                <button class="btn-icon edit" onclick="showParcelDetail(${JSON.stringify(p).replace(/"/g,'&quot;')})" title="View details">
+                    <i class="fa-solid fa-eye"></i>
+                </button>
+            </td>
+        </tr>`).join("");
+        renderPagination("parcelPagination", d.page, d.pages, p => { parcelPage=p; loadParcels(); });
+    } catch(e) {
+        tbody.innerHTML=`<tr><td colspan="9" class="loading-row" style="color:#f87171"><i class="fa-solid fa-circle-exclamation"></i> Failed to load</td></tr>`;
+    }
+}
+
+function showParcelDetail(p) {
+    document.getElementById("detailTitle").textContent = `Parcel: ${p.parcel_id}`;
+    document.getElementById("detailBody").innerHTML = `
+    <div class="detail-row"><div class="detail-label">Owner</div><div class="detail-value highlight">${esc(p.owner_name)}</div></div>
+    <div class="detail-row"><div class="detail-label">Survey Number</div><div class="detail-value">${esc(p.survey_number)}</div></div>
+    <div class="detail-row"><div class="detail-label">Deed Number</div><div class="detail-value">${esc(p.deed_number||"—")}</div></div>
+    <div class="detail-row"><div class="detail-label">Land Use</div><div class="detail-value">${landUseBadge(p.registered_land_use)}</div></div>
+    <div class="detail-row"><div class="detail-label">Owner Type</div><div class="detail-value">${esc(p.owner_type)}</div></div>
+    <div class="detail-row"><div class="detail-label">Zone</div><div class="detail-value">${esc(p.zone_name||"—")}</div></div>
+    <div class="detail-row"><div class="detail-label">Area</div><div class="detail-value">${(p.area_sqm||0).toLocaleString()} m²</div></div>
+    <div class="detail-row"><div class="detail-label">Market Rate</div><div class="detail-value">₹${(p.market_rate_per_sqm||0).toLocaleString()}/m²</div></div>
+    <div class="detail-row"><div class="detail-label">Coverage Ratio</div><div class="detail-value">${p.max_coverage_ratio||"—"}</div></div>
+    <div class="detail-row"><div class="detail-label">Setback</div><div class="detail-value">${p.setback_meters||"—"} m</div></div>
+    <div class="detail-row"><div class="detail-label">Contact</div><div class="detail-value">${esc(p.contact_email||"—")}</div></div>
+    <div class="detail-row"><div class="detail-label">Registered</div><div class="detail-value">${esc(p.registration_date||"—")}</div></div>
+    <div class="detail-row"><div class="detail-label">Notes</div><div class="detail-value">${esc(p.notes||"—")}</div></div>
+    <div class="detail-row"><div class="detail-label">Added</div><div class="detail-value">${fmtDate(p.created_at)}</div></div>`;
+    openDetail();
+}
+
+// ── Encroachments (READ ONLY) ──
+async function loadEncroachments() {
+    const tbody = document.getElementById("encTbody");
+    tbody.innerHTML=`<tr><td colspan="9" class="loading-row"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</td></tr>`;
+    const params = new URLSearchParams({
+        page: encPage, per_page: 15,
+        search: document.getElementById("encSearch")?.value||"",
+        severity: document.getElementById("encSeverity")?.value||"",
+        status: document.getElementById("encStatus")?.value||"",
+    });
+    try {
+        const r = await fetch(`/api/db/encroachments?${params}`);
+        const d = await r.json();
+        if (!d.encroachments?.length) {
+            tbody.innerHTML=`<tr><td colspan="9" class="loading-row" style="color:var(--text-muted)"><i class="fa-solid fa-inbox"></i> No records</td></tr>`;
+            document.getElementById("encPagination").innerHTML=""; return;
+        }
+        tbody.innerHTML = d.encroachments.map(r=>`
+        <tr>
+            <td style="color:var(--text-muted);font-family:monospace">${r.id}</td>
+            <td style="color:var(--accent-cyan);font-family:monospace;font-size:10px">${esc(r.flag_id)}</td>
+            <td style="font-size:11px">${encTypeLabel(r.encroachment_type)}</td>
+            <td>${severityBadge(r.severity)}</td>
+            <td style="color:var(--text-primary)">${esc(r.violator_name||"—")}</td>
+            <td style="font-family:monospace">${(r.encroached_area_sqm||0).toFixed(1)}</td>
+            <td style="font-family:monospace">₹${(r.estimated_penalty||0).toLocaleString()}</td>
+            <td>${statusBadge(r.status)}</td>
+            <td>
+                <button class="btn-icon edit" onclick="showEncDetail(${JSON.stringify(r).replace(/"/g,'&quot;')})" title="View details">
+                    <i class="fa-solid fa-eye"></i>
+                </button>
+            </td>
+        </tr>`).join("");
+        renderPagination("encPagination", d.page, d.pages, p => { encPage=p; loadEncroachments(); });
+    } catch(e) {
+        tbody.innerHTML=`<tr><td colspan="9" class="loading-row" style="color:#f87171"><i class="fa-solid fa-circle-exclamation"></i> Failed to load</td></tr>`;
+    }
+}
+
+function showEncDetail(r) {
+    document.getElementById("detailTitle").textContent = `Violation: ${r.flag_id}`;
+    document.getElementById("detailBody").innerHTML = `
+    <div class="detail-row"><div class="detail-label">Type</div><div class="detail-value highlight">${encTypeLabel(r.encroachment_type)}</div></div>
+    <div class="detail-row"><div class="detail-label">Severity</div><div class="detail-value">${severityBadge(r.severity)}</div></div>
+    <div class="detail-row"><div class="detail-label">Status</div><div class="detail-value">${statusBadge(r.status)}</div></div>
+    <div class="detail-row"><div class="detail-label">Violator</div><div class="detail-value">${esc(r.violator_name||"Unknown")}</div></div>
+    <div class="detail-row"><div class="detail-label">Violator Parcel</div><div class="detail-value">${esc(r.violator_parcel_id||"—")}</div></div>
+    <div class="detail-row"><div class="detail-label">Affected Parcel</div><div class="detail-value">${esc(r.affected_parcel_id)}</div></div>
+    <div class="detail-row"><div class="detail-label">Affected Owner</div><div class="detail-value">${esc(r.affected_owner||"—")}</div></div>
+    <div class="detail-row"><div class="detail-label">Encroached Area</div><div class="detail-value">${(r.encroached_area_sqm||0).toFixed(1)} m²</div></div>
+    <div class="detail-row"><div class="detail-label">Penalty</div><div class="detail-value">₹${(r.estimated_penalty||0).toLocaleString()}</div></div>
+    <div class="detail-row"><div class="detail-label">Confidence</div><div class="detail-value">${((r.confidence||0)*100).toFixed(0)}%</div></div>
+    <div class="detail-row"><div class="detail-label">Recommended Action</div><div class="detail-value">${esc(r.recommended_action||"—")}</div></div>
+    <div class="detail-row"><div class="detail-label">Notes</div><div class="detail-value">${esc(r.notes||"—")}</div></div>
+    <div class="detail-row"><div class="detail-label">Logged</div><div class="detail-value">${fmtDate(r.created_at)}</div></div>`;
+    openDetail();
+}
+
+// ── Profile / Change Password ──
+async function changePassword() {
+    const np = document.getElementById("newPwd").value;
+    const cp = document.getElementById("confirm_password") || document.getElementById("confirmPwd");
+    const confirmVal = (document.getElementById("confirmPwd")?.value) || "";
+    const alertEl  = document.getElementById("pwdAlert");
+
+    if (!np || !confirmVal) { showInlineAlert(alertEl,"error","Both fields are required."); return; }
+    if (np !== confirmVal)  { showInlineAlert(alertEl,"error","Passwords do not match.");   return; }
+    if (np.length < 8)      { showInlineAlert(alertEl,"error","Min 8 characters required."); return; }
+
+    try {
+        const r = await fetch(`/api/users/${currentUserId}`, {
+            method: "PUT",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({password: np}),
+        });
+        const d = await r.json();
+        if (d.status === "success") {
+            showInlineAlert(alertEl,"success","Password updated successfully!");
+            document.getElementById("newPwd").value = "";
+            document.getElementById("confirmPwd").value = "";
+        } else {
+            showInlineAlert(alertEl,"error", d.message||"Update failed.");
+        }
+    } catch { showInlineAlert(alertEl,"error","Network error."); }
+}
+
+// ── Detail panel ──
+function openDetail()  { document.getElementById("detailPanel").classList.add("open"); document.getElementById("detailOverlay").classList.add("open"); }
+function closeDetail() { document.getElementById("detailPanel").classList.remove("open"); document.getElementById("detailOverlay").classList.remove("open"); }
+
+// ── Pagination ──
+function renderPagination(id, cur, total, onPage) {
+    const el = document.getElementById(id);
+    if (!el || total <= 1) { if(el) el.innerHTML=""; return; }
+    let h = `<button class="page-btn" ${cur<=1?"disabled":""} onclick="(${onPage.toString()})(${cur-1})"><i class="fa-solid fa-chevron-left"></i></button>`;
+    for (const p of pagRange(cur, total)) {
+        h += p==="…" ? `<span class="page-info">…</span>` :
+             `<button class="page-btn ${p===cur?"active":""}" onclick="(${onPage.toString()})(${p})">${p}</button>`;
+    }
+    h += `<button class="page-btn" ${cur>=total?"disabled":""} onclick="(${onPage.toString()})(${cur+1})"><i class="fa-solid fa-chevron-right"></i></button>
+          <span class="page-info">Page ${cur} of ${total}</span>`;
+    el.innerHTML = h;
+}
+function pagRange(cur,total){
+    if(total<=7) return Array.from({length:total},(_,i)=>i+1);
+    const p=[1];
+    if(cur>3) p.push("…");
+    for(let i=Math.max(2,cur-1);i<=Math.min(total-1,cur+1);i++) p.push(i);
+    if(cur<total-2) p.push("…");
+    p.push(total); return p;
+}
+
+// ── Helpers ──
+function esc(s){ if(s==null) return ""; return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function fmtDate(iso){ if(!iso) return "—"; try{ const d=new Date(iso); return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})+" "+d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}); } catch{ return iso; } }
+function severityBadge(s){ const m={CRITICAL:"badge-critical",HIGH:"badge-high",MEDIUM:"badge-medium",LOW:"badge-low"}; return `<span class="badge ${m[s]||'badge-gray'}">${esc(s)}</span>`; }
+function statusBadge(s){ const m={DETECTED:"badge-medium",UNDER_REVIEW:"badge-blue",NOTICE_ISSUED:"badge-amber",RESOLVED:"badge-green",DISMISSED:"badge-gray"}; return `<span class="badge ${m[s]||'badge-gray'}">${esc((s||"").replace(/_/g," "))}</span>`; }
+function landUseBadge(s){ return `<span class="badge badge-blue">${esc((s||"").replace(/_/g," "))}</span>`; }
+function encTypeLabel(t){ const m={BOUNDARY_SPILLOVER:"Boundary Spillover",GOVERNMENT_LAND_TRESPASS:"Gov. Trespass",WATERBODY_BUFFER_VIOLATION:"Waterbody Buffer",UNAUTHORIZED_LAND_USE:"Unauthorized Use",SETBACK_EXCESS:"Setback Excess"}; return esc(m[t]||t); }
+function showInlineAlert(el,type,msg){
+    if(!el) return;
+    const icons={success:"fa-check-circle",error:"fa-circle-exclamation"};
+    const colors={success:"rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.25);color:#86efac",error:"rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#fca5a5"};
+    el.style.display="flex"; el.style.alignItems="center"; el.style.gap="8px";
+    el.style.padding="10px 12px"; el.style.borderRadius="8px"; el.style.fontSize="12px";
+    el.style.background=colors[type]?.split(";")[0]?.replace("background:","");
+    el.innerHTML=`<i class="fa-solid ${icons[type]||'fa-info'}"></i> ${esc(msg)}`;
+    el.setAttribute("style",`display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:8px;font-size:12px;background:${colors[type]?.replace(/;/g,";")}`);
+}
+function debounce(fn,d){ let t; return function(...a){ clearTimeout(t); t=setTimeout(()=>fn.apply(this,a),d); }; }
+function toast(type,msg){
+    const icons={success:"fa-check-circle",error:"fa-circle-exclamation",info:"fa-circle-info"};
+    const el=document.createElement("div"); el.className=`toast ${type}`;
+    el.innerHTML=`<i class="fa-solid ${icons[type]||'fa-bell'}"></i><span>${esc(msg)}</span>`;
+    document.getElementById("toastContainer")?.appendChild(el);
+    setTimeout(()=>el.style.opacity="0",3500); setTimeout(()=>el.remove(),3900);
+}
+</script>
+</body>
+</html>
