@@ -1,0 +1,40 @@
+# Municipal GIS Encroachment Detection System
+# Production deployment files
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Environment & Secrets
+.env
+*.env.local
+*.env.production
+
+# Database (SQLite - use managed DB in production)
+municipal.db
+*.db
+*.sqlite3
+
+# Windows bat files (not needed in production)
+start_app.bat
+OPEN_FOR_ALL.bat
+
+# Generated output files
+*.pdf
+*.pptx
+Municipal_GIS_Whitepaper.html
+generate_corporate_ppt.py
+create_presentation_pdf.py
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
