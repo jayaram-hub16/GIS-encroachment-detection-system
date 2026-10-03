@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — Municipal GIS Encroachment System</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body class="dark-theme">
+
+<!-- ══════════════════ SIDEBAR ══════════════════ -->
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+        <div class="sidebar-icon"><i class="fa-solid fa-building-shield"></i></div>
+        <div>
+            <div class="sidebar-title">MuniGIS</div>
+            <div class="sidebar-sub">Encroachment System</div>
+        </div>
+        <button class="sidebar-close" id="sidebarClose" aria-label="Close sidebar">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </div>
+
+    <nav class="sidebar-nav">
+        <div class="nav-section-label">Overview</div>
+        <a class="nav-item active" data-page="overview" href="#" onclick="showPage('overview',this)">
+            <i class="fa-solid fa-gauge-high"></i> Dashboard
+        </a>
+
+        <div class="nav-section-label">Records</div>
+        <a class="nav-item" data-page="parcels" href="#" onclick="showPage('parcels',this)">
+            <i class="fa-solid fa-map-location-dot"></i> Land Parcels
+        </a>
+        <a class="nav-item" data-page="encroachments" href="#" onclick="showPage('encroachments',this)">
+            <i class="fa-solid fa-triangle-exclamation"></i> Encroachments
+        </a>
+
+        <div class="nav-section-label">Admin</div>
+        <a class="nav-item" data-page="users" href="#" onclick="showPage('users',this)" id="usersNavItem">
+            <i class="fa-solid fa-users-gear"></i> User Management
+        </a>
+        <a class="nav-item" data-page="auditlogs" href="#" onclick="showPage('auditlogs',this)">
+            <i class="fa-solid fa-scroll"></i> Audit Logs
+        </a>
+        <a class="nav-item" href="/" title="Open GIS Map">
+            <i class="fa-solid fa-map"></i> Live GIS Map
+        </a>
+    </nav>
+
+    <div class="sidebar-footer">
+        <div class="user-badge">
+            <div class="user-avatar">{{ user.username[0]|upper }}</div>
+            <div>
+                <div class="user-name">{{ user.full_name or user.username }}</div>
+                <div class="user-role">{{ user.role|upper }}</div>
+            </div>
+        </div>
+        <a href="{{ url_for('logout') }}" class="btn-logout" title="Logout">
+            <i class="fa-solid fa-right-from-bracket"></i>
+        </a>
+    </div>
+</aside>
+
+<!-- Sidebar overlay for mobile -->
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<!-- ══════════════════ MAIN CONTENT ══════════════════ -->
+<main class="main-content" id="mainContent">
+
+    <!-- Top Bar -->
+    <div class="topbar">
+        <div class="topbar-left">
+            <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">
+                <i class="fa-solid fa-bars"></i>
+            </button>
+            <div class="page-breadcrumb">
+                <span id="breadcrumbText"><i class="fa-solid fa-gauge-high"></i> Dashboard</span>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <button class="topbar-btn" onclick="refreshCurrentPage()" title="Refresh data">
+                <i class="fa-solid fa-arrows-rotate" id="refreshIcon"></i>
+            </button>
+            <a href="/" class="topbar-btn" title="Open GIS Map">
+                <i class="fa-solid fa-map"></i>
+            </a>
+            <div class="topbar-user">
+                <div class="user-avatar-sm">{{ user.username[0]|upper }}</div>
+                <span>{{ user.username }}</span>
+            </div>
+            <a href="{{ url_for('logout') }}" class="btn-logout-top" title="Logout">
+                <i class="fa-solid fa-right-from-bracket"></i> Logout
+            </a>
+        </div>
+    </div>
+
+    <!-- ── PAGE: OVERVIEW ── -->
+    <section class="page-section active" id="page-overview">
+        <div class="section-header">
+            <h2 class="section-title">Mission Control Overview</h2>
+            <button class="btn-primary" onclick="refreshCurrentPage()">
+                <i class="fa-solid fa-arrows-rotate"></i> Refresh
+            </button>
+        </div>
+
+        <!-- KPI Cards -->
+        <div class="kpi-grid" id="kpiGrid">
+            <div class="kpi-card">
+                <div class="kpi-icon blue"><i class="fa-solid fa-map-location-dot"></i></div>
+                <div class="kpi-body">
+                    <div class="kpi-label">Total Parcels (DB)</div>
+                    <div class="kpi-value" id="kpiParcels">—</div>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon red"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                <div class="kpi-body">
+                    <div class="kpi-label">Encroachments (DB)</div>
+                    <div class="kpi-value" id="kpiEnc">—</div>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon cyan"><i class="fa-solid fa-satellite-dish"></i></div>
+                <div class="kpi-body">
+                    <div class="kpi-label">GIS Flags (Live)</div>
+                    <div class="kpi-value" id="kpiGis">—</div>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon amber"><i class="fa-solid fa-users-gear"></i></div>
+                <div class="kpi-body">
+                    <div class="kpi-label">System Users</div>
+                    <div class="kpi-value" id="kpiUsers">—</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Severity Breakdown + Recent -->
+        <div class="overview-grid">
+            <div class="dash-card">
+                <div class="dash-card-header">
+                    <h3><i class="fa-solid fa-chart-pie"></i> Severity Breakdown</h3>
+                </div>
+                <div id="severityChart" class="sev-chart-wrap"></div>
+            </div>
+            <div class="dash-card">
+                <div class="dash-card-header">
+                    <h3><i class="fa-solid fa-clock-rotate-left"></i> Recent Parcels</h3>
+                    <button class="btn-sm-link" onclick="showPage('parcels',null)">View All</button>
+                </div>
+                <div id="recentParcels" class="recent-list"></div>
+            </div>
+            <div class="dash-card">
+                <div class="dash-card-header">
+                    <h3><i class="fa-solid fa-bell"></i> Recent Violations</h3>
+                    <button class="btn-sm-link" onclick="showPage('encroachments',null)">View All</button>
+                </div>
+                <div id="recentEnc" class="recent-list"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── PAGE: PARCELS ── -->
+    <section class="page-section" id="page-parcels">
+        <div class="section-header">
+            <h2 class="section-title"><i class="fa-solid fa-map-location-dot"></i> Land Parcel Records</h2>
+            <button class="btn-primary" onclick="openParcelForm()">
+                <i class="fa-solid fa-plus"></i> Add Parcel
+            </button>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="table-toolbar">
+            <div class="search-wrap">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" id="parcelSearch" placeholder="Search parcels…" oninput="debounce(loadParcels, 350)()">
+            </div>
+            <select id="parcelLandUse" onchange="loadParcels()">
+                <option value="">All Land Uses</option>
+                <option value="RESIDENTIAL">Residential</option>
+                <option value="COMMERCIAL">Commercial</option>
+                <option value="INDUSTRIAL">Industrial</option>
+                <option value="AGRICULTURAL">Agricultural</option>
+                <option value="PUBLIC_UTILITY_ROAD">Road / Utility</option>
+                <option value="PUBLIC_PARK">Public Park</option>
+                <option value="GOVERNMENT_RESERVE">Government Reserve</option>
+                <option value="WATER_BODY">Water Body</option>
+            </select>
+            <select id="parcelOwnerType" onchange="loadParcels()">
+                <option value="">All Owner Types</option>
+                <option value="PRIVATE_CITIZEN">Private Citizen</option>
+                <option value="COMMERCIAL_ENTITY">Commercial Entity</option>
+                <option value="MUNICIPAL_CORPORATION">Municipal Corporation</option>
+                <option value="GOVERNMENT_REVENUE">Government Revenue</option>
+                <option value="WATER_RESOURCES_AUTHORITY">Water Resources</option>
+            </select>
+            <button class="btn-outline" onclick="loadParcels()">
+                <i class="fa-solid fa-arrows-rotate"></i> Refresh
+            </button>
+        </div>
+
+        <!-- Table -->
+        <div class="table-wrap">
+            <table class="data-table" id="parcelTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th onclick="sortParcels('parcel_id')" class="sortable">Parcel ID <i class="fa-solid fa-sort"></i></th>
+                        <th onclick="sortParcels('survey_number')" class="sortable">Survey No. <i class="fa-solid fa-sort"></i></th>
+                        <th onclick="sortParcels('owner_name')" class="sortable">Owner <i class="fa-solid fa-sort"></i></th>
+                        <th>Land Use</th>
+                        <th>Area (m²)</th>
+                        <th onclick="sortParcels('created_at')" class="sortable">Created <i class="fa-solid fa-sort"></i></th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="parcelTbody">
+                    <tr><td colspan="8" class="loading-row"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination" id="parcelPagination"></div>
+    </section>
+
+    <!-- ── PAGE: ENCROACHMENTS ── -->
+    <section class="page-section" id="page-encroachments">
+        <div class="section-header">
+            <h2 class="section-title"><i class="fa-solid fa-triangle-exclamation"></i> Encroachment Records</h2>
+            <button class="btn-primary" onclick="openEncForm()">
+                <i class="fa-solid fa-plus"></i> Log Violation
+            </button>
+        </div>
+
+        <div class="table-toolbar">
+            <div class="search-wrap">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" id="encSearch" placeholder="Search violations…" oninput="debounce(loadEncroachments,350)()">
+            </div>
+            <select id="encSeverity" onchange="loadEncroachments()">
+                <option value="">All Severities</option>
+                <option value="CRITICAL">Critical</option>
+                <option value="HIGH">High</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="LOW">Low</option>
+            </select>
+            <select id="encStatus" onchange="loadEncroachments()">
+                <option value="">All Statuses</option>
+                <option value="DETECTED">Detected</option>
+                <option value="UNDER_REVIEW">Under Review</option>
+                <option value="NOTICE_ISSUED">Notice Issued</option>
+                <option value="RESOLVED">Resolved</option>
+                <option value="DISMISSED">Dismissed</option>
+            </select>
+            <button class="btn-outline" onclick="loadEncroachments()">
+                <i class="fa-solid fa-arrows-rotate"></i> Refresh
+            </button>
+        </div>
+
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Flag ID</th>
+                        <th>Type</th>
+                        <th>Severity</th>
+                        <th>Violator</th>
+                        <th>Area (m²)</th>
+                        <th>Penalty (₹)</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="encTbody">
+                    <tr><td colspan="10" class="loading-row"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination" id="encPagination"></div>
+    </section>
+
+    <!-- ── PAGE: USERS ── -->
+    <section class="page-section" id="page-users">
+        <div class="section-header">
+            <h2 class="section-title"><i class="fa-solid fa-users-gear"></i> User Management</h2>
+            <button class="btn-primary" onclick="openUserForm()">
+                <i class="fa-solid fa-user-plus"></i> Add User
+            </button>
+        </div>
+
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Username</th>
+                        <th>Full Name</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Status</th>
+                        <th>Last Login</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="userTbody">
+                    <tr><td colspan="8" class="loading-row"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ── PAGE: AUDIT LOGS (admin only) ── -->
+    <section class="page-section" id="page-auditlogs">
+        <div class="section-header">
+            <h2 class="section-title"><i class="fa-solid fa-scroll"></i> Audit Logs</h2>
+            <button class="btn-outline" onclick="loadAuditLogs()">
+                <i class="fa-solid fa-arrows-rotate"></i> Refresh
+            </button>
+        </div>
+
+        <div class="table-toolbar">
+            <div class="search-wrap">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" id="auditSearch" placeholder="Search actor or detail…" oninput="debounce(loadAuditLogs,350)()">
+            </div>
+            <select id="auditAction" onchange="loadAuditLogs()">
+                <option value="">All Actions</option>
+                <option value="CREATED">Created</option>
+                <option value="UPDATED">Updated</option>
+                <option value="DELETED">Deleted</option>
+                <option value="LOGIN">Login</option>
+                <option value="LOGOUT">Logout</option>
+                <option value="SIGNUP">Signup</option>
+                <option value="SCAN">GIS Scan</option>
+                <option value="RESET">Reset</option>
+            </select>
+            <select id="auditResource" onchange="loadAuditLogs()">
+                <option value="">All Resources</option>
+                <option value="parcel">Parcel</option>
+                <option value="encroachment">Encroachment</option>
+                <option value="user">User</option>
+                <option value="system">System</option>
+                <option value="gis_flag">GIS Flag</option>
+            </select>
+        </div>
+
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Timestamp</th>
+                        <th>Actor</th>
+                        <th>Action</th>
+                        <th>Resource</th>
+                        <th>Resource ID</th>
+                        <th>Detail</th>
+                        <th>IP</th>
+                    </tr>
+                </thead>
+                <tbody id="auditTbody">
+                    <tr><td colspan="8" class="loading-row"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination" id="auditPagination"></div>
+    </section>
+
+</main>
+
+<!-- ══════════════════ MODALS ══════════════════ -->
+
+<!-- PARCEL FORM MODAL -->
+<div class="modal-overlay" id="parcelModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="parcelModalTitle"><i class="fa-solid fa-map-location-dot"></i> Add Land Parcel</h3>
+            <button class="modal-close" onclick="closeModal('parcelModal')"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <form id="parcelForm" novalidate>
+                <input type="hidden" id="parcelRecordId">
+                <div class="form-grid-2">
+                    <div class="form-group">
+                        <label class="form-label">Survey Number *</label>
+                        <input class="form-input" id="fSurveyNo" placeholder="e.g. SRV-2024-001" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Parcel ID</label>
+                        <input class="form-input" id="fParcelId" placeholder="Auto-generated if empty">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Owner Name *</label>
+                        <input class="form-input" id="fOwnerName" placeholder="Full legal name" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Owner Type</label>
+                        <select class="form-input" id="fOwnerType">
+                            <option value="PRIVATE_CITIZEN">Private Citizen</option>
+                            <option value="COMMERCIAL_ENTITY">Commercial Entity</option>
+                            <option value="MUNICIPAL_CORPORATION">Municipal Corporation</option>
+                            <option value="GOVERNMENT_REVENUE">Government Revenue</option>
+                            <option value="WATER_RESOURCES_AUTHORITY">Water Resources Authority</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Registered Land Use *</label>
+                        <select class="form-input" id="fLandUse" required>
+                            <option value="RESIDENTIAL">Residential</option>
+                            <option value="COMMERCIAL">Commercial</option>
+                            <option value="INDUSTRIAL">Industrial</option>
+                            <option value="AGRICULTURAL">Agricultural</option>
+                            <option value="PUBLIC_UTILITY_ROAD">Road / Utility</option>
+                            <option value="PUBLIC_PARK">Public Park</option>
+                            <option value="GOVERNMENT_RESERVE">Government Reserve</option>
+                            <option value="WATER_BODY">Water Body</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Zone Name</label>
+                        <input class="form-input" id="fZone" placeholder="e.g. North Residential Zone">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Deed Number</label>
+                        <input class="form-input" id="fDeed" placeholder="e.g. DEED-2023-45">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Tax ID</label>
+                        <input class="form-input" id="fTaxId" placeholder="Property tax ID">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Area (m²)</label>
+                        <input class="form-input" type="number" id="fArea" placeholder="e.g. 450" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Market Rate (₹/m²)</label>
+                        <input class="form-input" type="number" id="fMarketRate" placeholder="e.g. 12000" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Max Coverage Ratio</label>
+                        <input class="form-input" type="number" id="fCoverage" placeholder="0.65" step="0.01" min="0" max="1">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Setback (meters)</label>
+                        <input class="form-input" type="number" id="fSetback" placeholder="2.5" step="0.5" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Latitude</label>
+                        <input class="form-input" type="number" id="fLat" placeholder="e.g. 12.9716" step="any">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Longitude</label>
+                        <input class="form-input" type="number" id="fLon" placeholder="e.g. 77.5946" step="any">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Contact Email</label>
+                        <input class="form-input" type="email" id="fEmail" placeholder="owner@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Contact Phone</label>
+                        <input class="form-input" id="fPhone" placeholder="+91 98765 43210">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Registration Date</label>
+                        <input class="form-input" type="date" id="fRegDate">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Notes</label>
+                    <textarea class="form-input" id="fNotes" rows="3" placeholder="Additional remarks…"></textarea>
+                </div>
+                <div class="form-alert" id="parcelFormAlert" style="display:none"></div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-outline" onclick="closeModal('parcelModal')">Cancel</button>
+            <button class="btn-primary" onclick="submitParcelForm()" id="parcelSubmitBtn">
+                <i class="fa-solid fa-floppy-disk"></i> Save Parcel
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ENCROACHMENT FORM MODAL -->
+<div class="modal-overlay" id="encModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="encModalTitle"><i class="fa-solid fa-triangle-exclamation"></i> Log Encroachment</h3>
+            <button class="modal-close" onclick="closeModal('encModal')"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <form id="encForm" novalidate>
+                <input type="hidden" id="encRecordId">
+                <div class="form-grid-2">
+                    <div class="form-group">
+                        <label class="form-label">Encroachment Type *</label>
+                        <select class="form-input" id="eType" required>
+                            <option value="BOUNDARY_SPILLOVER">Boundary Spillover</option>
+                            <option value="GOVERNMENT_LAND_TRESPASS">Government Land Trespass</option>
+                            <option value="WATERBODY_BUFFER_VIOLATION">Waterbody Buffer Violation</option>
+                            <option value="UNAUTHORIZED_LAND_USE">Unauthorized Land Use</option>
+                            <option value="SETBACK_EXCESS">Setback Excess</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Severity *</label>
+                        <select class="form-input" id="eSeverity" required>
+                            <option value="CRITICAL">Critical</option>
+                            <option value="HIGH">High</option>
+                            <option value="MEDIUM" selected>Medium</option>
+                            <option value="LOW">Low</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Violator Name</label>
+                        <input class="form-input" id="eViolator" placeholder="Full legal name">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Violator Parcel ID</label>
+                        <input class="form-input" id="eViolatorParcel" placeholder="PARCEL-XXXX">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Affected Parcel ID *</label>
+                        <input class="form-input" id="eAffectedParcel" placeholder="PARCEL-XXXX" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Affected Owner</label>
+                        <input class="form-input" id="eAffectedOwner" placeholder="Owner name">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Affected Land Use</label>
+                        <select class="form-input" id="eAffLandUse">
+                            <option value="RESIDENTIAL">Residential</option>
+                            <option value="COMMERCIAL">Commercial</option>
+                            <option value="PUBLIC_UTILITY_ROAD">Road / Utility</option>
+                            <option value="WATER_BODY">Water Body</option>
+                            <option value="GOVERNMENT_RESERVE">Government Reserve</option>
+                            <option value="AGRICULTURAL">Agricultural</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Encroached Area (m²)</label>
+                        <input class="form-input" type="number" id="eArea" placeholder="e.g. 25" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Estimated Penalty (₹)</label>
+                        <input class="form-input" type="number" id="ePenalty" placeholder="e.g. 50000" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Confidence (0-1)</label>
+                        <input class="form-input" type="number" id="eConf" placeholder="0.9" min="0" max="1" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Status</label>
+                        <select class="form-input" id="eStatus">
+                            <option value="DETECTED">Detected</option>
+                            <option value="UNDER_REVIEW">Under Review</option>
+                            <option value="NOTICE_ISSUED">Notice Issued</option>
+                            <option value="RESOLVED">Resolved</option>
+                            <option value="DISMISSED">Dismissed</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Latitude</label>
+                        <input class="form-input" type="number" id="eLat" placeholder="e.g. 12.97" step="any">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Longitude</label>
+                        <input class="form-input" type="number" id="eLon" placeholder="e.g. 77.59" step="any">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Recommended Action</label>
+                    <textarea class="form-input" id="eAction" rows="2" placeholder="Demolition notice, penalty levy, etc."></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Notes</label>
+                    <textarea class="form-input" id="eNotes" rows="2" placeholder="Field survey remarks…"></textarea>
+                </div>
+                <div class="form-alert" id="encFormAlert" style="display:none"></div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-outline" onclick="closeModal('encModal')">Cancel</button>
+            <button class="btn-primary" onclick="submitEncForm()" id="encSubmitBtn">
+                <i class="fa-solid fa-floppy-disk"></i> Save Record
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- USER FORM MODAL -->
+<div class="modal-overlay" id="userModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="userModalTitle"><i class="fa-solid fa-user-plus"></i> Add User</h3>
+            <button class="modal-close" onclick="closeModal('userModal')"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <form id="userForm" novalidate>
+                <input type="hidden" id="userRecordId">
+                <div class="form-grid-2">
+                    <div class="form-group">
+                        <label class="form-label">Username *</label>
+                        <input class="form-input" id="uUsername" placeholder="e.g. officer1" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Email *</label>
+                        <input class="form-input" type="email" id="uEmail" placeholder="officer@municipal.gov" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Full Name</label>
+                        <input class="form-input" id="uFullName" placeholder="Full Name">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Role</label>
+                        <select class="form-input" id="uRole">
+                            <option value="officer">Officer</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Password <span id="pwdRequired">*</span></label>
+                        <input class="form-input" type="password" id="uPassword" placeholder="Min 8 characters">
+                    </div>
+                    <div class="form-group" id="activeToggleWrap">
+                        <label class="form-label">Account Status</label>
+                        <select class="form-input" id="uActive">
+                            <option value="true">Active</option>
+                            <option value="false">Inactive</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-alert" id="userFormAlert" style="display:none"></div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-outline" onclick="closeModal('userModal')">Cancel</button>
+            <button class="btn-primary" onclick="submitUserForm()" id="userSubmitBtn">
+                <i class="fa-solid fa-floppy-disk"></i> Save User
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- DELETE CONFIRM MODAL -->
+<div class="modal-overlay" id="deleteModal">
+    <div class="modal modal-sm">
+        <div class="modal-header danger">
+            <h3><i class="fa-solid fa-trash-can"></i> Confirm Deletion</h3>
+            <button class="modal-close" onclick="closeModal('deleteModal')"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <p id="deleteMessage" style="color:var(--text-secondary);font-size:14px;line-height:1.6;"></p>
+            <div style="margin-top:16px; padding:12px; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); border-radius:8px; font-size:12px; color:#fca5a5;">
+                <i class="fa-solid fa-circle-exclamation"></i> This action is permanent and cannot be undone.
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-outline" onclick="closeModal('deleteModal')">Cancel</button>
+            <button class="btn-danger" id="deleteConfirmBtn" onclick="executeDelete()">
+                <i class="fa-solid fa-trash-can"></i> Delete Permanently
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast notification -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>
