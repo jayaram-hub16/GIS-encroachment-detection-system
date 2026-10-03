@@ -8,7 +8,7 @@ Audit log captures every admin action.
 """
 
 from __future__ import annotations
-import os, re, uuid
+import os, re, uuid, socket
 from datetime import datetime, timezone
 from functools import wraps
 
@@ -240,8 +240,6 @@ def logout():
 # ══════════════════════════════════════════════════════════════════
 #  PAGE ROUTES
 # ══════════════════════════════════════════════════════════════════
-
-import socket
 
 def get_host_ip() -> str:
     """Get the best local IP address for LAN access."""
