@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connect — Municipal GIS System</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #0a0e1a; color: #f1f5f9;
+            min-height: 100vh; display: flex; align-items: center;
+            justify-content: center; padding: 20px;
+        }
+        .card {
+            background: #1a2235; border: 1px solid #1e2d45;
+            border-radius: 24px; padding: 40px;
+            max-width: 520px; width: 100%; text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        .logo { font-size: 42px; margin-bottom: 12px; }
+        h1 { font-size: 22px; font-weight: 800; color: #f1f5f9; margin-bottom: 6px; }
+        .sub { font-size: 13px; color: #64748b; margin-bottom: 30px; }
+
+        .url-box {
+            background: #0f1520; border: 1px solid #1e2d45;
+            border-radius: 14px; padding: 18px 20px;
+            font-size: 26px; font-weight: 800;
+            color: #06b6d4; letter-spacing: 0.04em;
+            margin-bottom: 16px; cursor: pointer;
+            transition: all 0.2s;
+        }
+        .url-box:hover { border-color: #06b6d4; background: rgba(6,182,212,0.06); }
+        .copy-hint { font-size: 11px; color: #475569; margin-bottom: 30px; }
+
+        .qr-wrap {
+            background: white; border-radius: 16px;
+            padding: 16px; display: inline-block;
+            margin-bottom: 20px;
+        }
+        #qrcode canvas, #qrcode img { display: block; }
+
+        .steps {
+            background: #0f1520; border: 1px solid #1e2d45;
+            border-radius: 14px; padding: 20px; text-align: left;
+            margin-top: 24px;
+        }
+        .steps h3 { font-size: 13px; font-weight: 700; color: #94a3b8; margin-bottom: 14px;
+                    text-transform: uppercase; letter-spacing: 0.05em; }
+        .step { display: flex; gap: 12px; margin-bottom: 12px; align-items: flex-start; }
+        .step-num {
+            width: 24px; height: 24px; border-radius: 50%;
+            background: rgba(59,130,246,0.15); color: #60a5fa;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; font-weight: 700; flex-shrink: 0;
+        }
+        .step-text { font-size: 13px; color: #94a3b8; line-height: 1.5; }
+        .step-text strong { color: #f1f5f9; }
+
+        .badge-warning {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.25);
+            color: #fbbf24; border-radius: 10px; padding: 8px 14px;
+            font-size: 12px; margin-top: 16px;
+        }
+
+        .btn-login {
+            display: inline-block; margin-top: 24px;
+            background: linear-gradient(135deg, #2563eb, #0891b2);
+            color: white; padding: 12px 28px; border-radius: 12px;
+            font-size: 14px; font-weight: 700; text-decoration: none;
+            box-shadow: 0 4px 18px rgba(37,99,235,0.3);
+        }
+        .btn-login:hover { opacity: 0.9; }
+
+        .copied { color: #4ade80; font-size: 12px; display: none; margin-top: 6px; }
+        @media (max-width: 500px) {
+            .card { padding: 28px 18px; }
+            .url-box { font-size: 18px; }
+        }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="logo">📡</div>
+    <h1>Connect All Devices</h1>
+    <p class="sub">Open this link on any laptop, phone, or tablet on the same Wi-Fi</p>
+
+    <!-- The big clickable URL -->
+    <div class="url-box" onclick="copyUrl()" id="urlBox">
+        http://{{ host_ip }}:5000
+    </div>
+    <div class="copy-hint">👆 Click to copy &nbsp;|&nbsp; <span class="copied" id="copiedMsg">✅ Copied!</span></div>
+
+    <!-- QR Code for phones -->
+    <div class="qr-wrap">
+        <div id="qrcode"></div>
+    </div>
+    <p style="font-size:12px;color:#475569;margin-bottom:8px">
+        📱 Scan this QR code with your phone camera
+    </p>
+
+    <!-- Steps -->
+    <div class="steps">
+        <h3>How to connect</h3>
+        <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-text">Make sure all devices are on the <strong>same Wi-Fi network</strong></div>
+        </div>
+        <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-text">On any laptop: type <strong>http://{{ host_ip }}:5000</strong> in the browser address bar</div>
+        </div>
+        <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-text">On phone/tablet: <strong>scan the QR code</strong> above with your camera</div>
+        </div>
+        <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-text">Sign up for a new account or use: <strong>admin / Admin@1234</strong></div>
+        </div>
+    </div>
+
+    <div class="badge-warning">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        This server must stay running on this computer for others to connect
+    </div>
+
+    <br>
+    <a href="/login" class="btn-login"><i class="fa-solid fa-right-to-bracket"></i> Go to Login</a>
+</div>
+
+<!-- QR Code library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+    var url = "http://{{ host_ip }}:5000";
+    new QRCode(document.getElementById("qrcode"), {
+        text: url,
+        width: 200, height: 200,
+        colorDark: "#000000", colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.H
+    });
+
+    function copyUrl() {
+        navigator.clipboard.writeText(url).then(function() {
+            document.getElementById("copiedMsg").style.display = "inline";
+            document.getElementById("urlBox").style.borderColor = "#22c55e";
+            setTimeout(function() {
+                document.getElementById("copiedMsg").style.display = "none";
+                document.getElementById("urlBox").style.borderColor = "#1e2d45";
+            }, 2000);
+        }).catch(function() {
+            // fallback
+            var el = document.createElement('textarea');
+            el.value = url;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            document.getElementById("copiedMsg").style.display = "inline";
+        });
+    }
+</script>
+</body>
+</html>
