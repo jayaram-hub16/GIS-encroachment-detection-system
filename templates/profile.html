@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Profile — Municipal GIS System</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body class="dark-theme">
+
+<!-- ── Sidebar ── -->
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+        <div class="sidebar-icon"><i class="fa-solid fa-building-shield"></i></div>
+        <div>
+            <div class="sidebar-title">MuniGIS</div>
+            <div class="sidebar-sub">Encroachment System</div>
+        </div>
+        <button class="sidebar-close" id="sidebarClose"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <nav class="sidebar-nav">
+        <div class="nav-section-label">Navigation</div>
+        <a class="nav-item" href="{{ url_for('dashboard') }}">
+            <i class="fa-solid fa-gauge-high"></i> Dashboard
+        </a>
+        <a class="nav-item" href="{{ url_for('index') }}">
+            <i class="fa-solid fa-map"></i> GIS Map
+        </a>
+        <a class="nav-item active" href="{{ url_for('profile_page') }}">
+            <i class="fa-solid fa-user-circle"></i> My Profile
+        </a>
+    </nav>
+    <div class="sidebar-footer">
+        <div class="user-badge">
+            <div class="user-avatar">{{ user.username[0]|upper }}</div>
+            <div>
+                <div class="user-name">{{ user.full_name or user.username }}</div>
+                <div class="user-role">{{ user.role_display if user.role_display is defined else user.role|upper }}</div>
+            </div>
+        </div>
+        <a href="{{ url_for('logout') }}" class="btn-logout" title="Logout">
+            <i class="fa-solid fa-right-from-bracket"></i>
+        </a>
+    </div>
+</aside>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<!-- ── Main Content ── -->
+<main class="main-content" id="mainContent">
+    <div class="topbar">
+        <div class="topbar-left">
+            <button class="menu-toggle" id="menuToggle"><i class="fa-solid fa-bars"></i></button>
+            <div class="page-breadcrumb">
+                <span class="breadcrumb-item">Account</span>
+                <i class="fa-solid fa-chevron-right"></i>
+                <span class="breadcrumb-current">My Profile</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="page-content" style="padding: 24px; max-width: 800px;">
+
+        <!-- Role Badge -->
+        <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
+            <div class="stat-card">
+                <div class="stat-icon" style="background: linear-gradient(135deg, #3b82f6, #06b6d4);">
+                    <i class="fa-solid fa-user"></i>
+                </div>
+                <div class="stat-info">
+                    <div class="stat-value">{{ user.username }}</div>
+                    <div class="stat-label">Username</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon" style="background: linear-gradient(135deg, #8b5cf6, #6366f1);">
+                    <i class="fa-solid fa-shield-halved"></i>
+                </div>
+                <div class="stat-info">
+                    <div class="stat-value" style="font-size: 14px;">
+                        {% if user.role == 'admin' %}<span style="color:#f59e0b">Administrator</span>
+                        {% elif user.role == 'gis_officer' %}<span style="color:#3b82f6">GIS Officer</span>
+                        {% elif user.role == 'surveyor' %}<span style="color:#22c55e">Surveyor</span>
+                        {% else %}<span style="color:#94a3b8">Viewer</span>{% endif %}
+                    </div>
+                    <div class="stat-label">Role</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon" style="background: linear-gradient(135deg, #22c55e, #16a34a);">
+                    <i class="fa-solid fa-circle-check"></i>
+                </div>
+                <div class="stat-info">
+                    <div class="stat-value" style="color:#22c55e">Active</div>
+                    <div class="stat-label">Account Status</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Profile Info Card -->
+        <div class="data-card" style="margin-bottom: 24px;">
+            <div class="card-header">
+                <h3 class="card-title"><i class="fa-solid fa-id-card"></i> Profile Information</h3>
+            </div>
+            <div style="padding: 24px;">
+                <div id="profileMsg" style="display:none; margin-bottom: 16px;"></div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="form-group">
+                        <label class="form-label">Full Name</label>
+                        <input type="text" id="fullName" class="form-control"
+                               value="{{ user.full_name or '' }}" placeholder="Your full name">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Email</label>
+                        <input type="email" class="form-control"
+                               value="{{ user.email }}" readonly style="opacity: 0.6;">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Phone</label>
+                        <input type="text" id="phone" class="form-control"
+                               value="{{ user.phone or '' }}" placeholder="Phone number">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Department</label>
+                        <input type="text" id="department" class="form-control"
+                               value="{{ user.department or '' }}" placeholder="Department name">
+                    </div>
+                </div>
+                <div style="display: flex; gap: 12px; margin-top: 20px;">
+                    <button class="btn-primary" onclick="updateProfile()">
+                        <i class="fa-solid fa-save"></i> Save Changes
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Change Password Card -->
+        <div class="data-card">
+            <div class="card-header">
+                <h3 class="card-title"><i class="fa-solid fa-key"></i> Change Password</h3>
+            </div>
+            <div style="padding: 24px;">
+                <div id="pwMsg" style="display:none; margin-bottom: 16px;"></div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="form-group" style="grid-column: 1/-1;">
+                        <label class="form-label">Current Password</label>
+                        <input type="password" id="currentPw" class="form-control" placeholder="Enter current password">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">New Password</label>
+                        <input type="password" id="newPw" class="form-control"
+                               placeholder="Min 8 chars, 1 uppercase, 1 number">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Confirm New Password</label>
+                        <input type="password" id="confirmPw" class="form-control" placeholder="Repeat new password">
+                    </div>
+                </div>
+                <button class="btn-primary" onclick="changePassword()" style="margin-top: 8px;">
+                    <i class="fa-solid fa-lock"></i> Update Password
+                </button>
+            </div>
+        </div>
+
+    </div>
+</main>
+
+<script>
+document.getElementById('menuToggle').addEventListener('click', () => {
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebarOverlay').classList.toggle('show');
+});
+document.getElementById('sidebarClose').addEventListener('click', closeSidebar);
+function closeSidebar() {
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebarOverlay').classList.remove('show');
+}
+
+function showMsg(elId, text, isError) {
+    const el = document.getElementById(elId);
+    el.style.display = 'block';
+    el.innerHTML = `<div class="alert ${isError ? 'alert-error' : 'alert-success'}" style="padding:10px 14px; border-radius:8px; font-size:13px; display:flex; gap:8px; align-items:center; background:${isError ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)'}; border:1px solid ${isError ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}; color:${isError ? '#fca5a5' : '#86efac'};">
+        <i class="fa-solid ${isError ? 'fa-circle-exclamation' : 'fa-circle-check'}"></i> ${text}
+    </div>`;
+    setTimeout(() => { el.style.display = 'none'; }, 5000);
+}
+
+async function updateProfile() {
+    const payload = {
+        full_name:  document.getElementById('fullName').value,
+        phone:      document.getElementById('phone').value,
+        department: document.getElementById('department').value,
+    };
+    const r = await fetch('/api/users/{{ user.id }}', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    });
+    const d = await r.json();
+    if (d.status === 'success') showMsg('profileMsg', 'Profile updated successfully!', false);
+    else showMsg('profileMsg', d.message || 'Update failed.', true);
+}
+
+async function changePassword() {
+    const payload = {
+        current_password: document.getElementById('currentPw').value,
+        new_password:     document.getElementById('newPw').value,
+        confirm_password: document.getElementById('confirmPw').value,
+    };
+    if (!payload.current_password || !payload.new_password) {
+        return showMsg('pwMsg', 'All password fields are required.', true);
+    }
+    if (payload.new_password !== payload.confirm_password) {
+        return showMsg('pwMsg', 'New passwords do not match.', true);
+    }
+    const r = await fetch('/api/change-password', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    });
+    const d = await r.json();
+    if (d.status === 'success') {
+        showMsg('pwMsg', 'Password updated successfully!', false);
+        ['currentPw','newPw','confirmPw'].forEach(id => document.getElementById(id).value = '');
+    } else showMsg('pwMsg', d.message || 'Password change failed.', true);
+}
+</script>
+</body>
+</html>
