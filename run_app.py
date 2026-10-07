@@ -1,29 +1,34 @@
 """
-run_app.py - Municipal GIS Encroachment Detection Web Application.
-Authentication : Flask-Login (session-based).
-Authorisation  : ROLE_USER (read-only) | ROLE_ADMIN (full CRUD).
-All mutation APIs are guarded server-side with admin_required().
-Public self-registration is supported via /signup.
-Audit log captures every admin action.
+run_app.py - Municipal GIS Encroachment Detection System
+Auth    : Flask-Login (session-based) + OTP password-reset
+AuthZ   : 4 roles — admin | gis_officer | surveyor | viewer
+          All mutation APIs guarded server-side.
+Features: RBAC, GIS analysis, parcel CRUD, encroachment case management,
+          evidence uploads, notifications, audit logging, CSV/JSON export.
 """
 
 from __future__ import annotations
-import os, re, uuid, socket
+import os, re, uuid, socket, json, csv
 from datetime import datetime, timezone
 from functools import wraps
+from io import StringIO, BytesIO
+from pathlib import Path
 
 from flask import (
     Flask, render_template, jsonify, request,
-    redirect, url_for, session
+    redirect, url_for, session, send_file, abort
 )
 from flask_login import (
     LoginManager, login_user, logout_user,
     login_required, current_user
 )
+from werkzeug.utils import secure_filename
 
 from database import (
     db, User, ParcelRecord, EncroachmentRecord, AuditLog,
-    ROLE_USER, ROLE_ADMIN, audit, init_db,
+    EvidenceFile, Notification, OTPToken,
+    ROLE_USER, ROLE_ADMIN, ROLE_GIS_OFFICER, ROLE_SURVEYOR, ROLE_VIEWER,
+    audit, notify, init_db,
 )
 from core.models import (
     MunicipalSurveyRegistry, DisputeStatus, LandUseType, OwnerType,
@@ -33,9 +38,9 @@ from core.detector         import EncroachmentDetector
 from core.dataset_generator import build_default_municipal_dataset
 from core.report_generator  import MunicipalReportGenerator
 
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  FLASK APP CONFIG
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
@@ -53,6 +58,17 @@ app.config["SESSION_COOKIE_HTTPONLY"]    = True
 app.config["SESSION_COOKIE_SAMESITE"]    = "Lax"
 app.config["SESSION_COOKIE_SECURE"]      = os.environ.get("HTTPS", "false").lower() == "true"
 
+# File upload configuration
+_upload_folder = os.environ.get("UPLOAD_FOLDER", os.path.join(BASE_DIR, "uploads"))
+os.makedirs(_upload_folder, exist_ok=True)
+app.config["UPLOAD_FOLDER"]        = _upload_folder
+app.config["MAX_CONTENT_LENGTH"]   = int(os.environ.get("UPLOAD_MAX_MB", 50)) * 1024 * 1024
+ALLOWED_IMAGE_EXT  = {"jpg", "jpeg", "png", "gif", "webp", "tif", "tiff"}
+ALLOWED_GEO_EXT    = {"geojson", "json", "kml", "kmz", "zip", "gpkg"}
+ALLOWED_DOC_EXT    = {"pdf", "csv", "xlsx", "xls", "txt"}
+ALLOWED_EXTENSIONS = ALLOWED_IMAGE_EXT | ALLOWED_GEO_EXT | ALLOWED_DOC_EXT
+
+
 init_db(app)
 
 login_manager = LoginManager(app)
@@ -66,9 +82,9 @@ def load_user(uid: str):
     return db.session.get(User, int(uid))
 
 
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  ROLE-BASED DECORATORS  (server-side enforcement)
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def admin_required(fn):
     """
@@ -87,6 +103,34 @@ def admin_required(fn):
     return login_required(wrapper)
 
 
+
+
+def write_required(fn):
+    """Allows admin OR gis_officer to modify data. Returns 403 for surveyor/viewer."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return jsonify({"status": "error", "message": "Authentication required.", "code": 401}), 401
+        if not current_user.can_write:
+            return jsonify({"status": "error",
+                            "message": "Write access required (admin or GIS officer).", "code": 403}), 403
+        return fn(*args, **kwargs)
+    return login_required(wrapper)
+
+
+def verify_required(fn):
+    """Allows admin, gis_officer, or surveyor to verify/reject encroachment cases."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return jsonify({"status": "error", "message": "Authentication required.", "code": 401}), 401
+        if not current_user.can_verify:
+            return jsonify({"status": "error",
+                            "message": "Verification access required.", "code": 403}), 403
+        return fn(*args, **kwargs)
+    return login_required(wrapper)
+
+
 def admin_page_required(fn):
     """Decorator for HTML pages: redirects non-admins to user dashboard."""
     @wraps(fn)
@@ -98,9 +142,9 @@ def admin_page_required(fn):
     return wrapper
 
 
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  GIS IN-MEMORY STATE  (unchanged from original)
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 class MunicipalAppState:
     def __init__(self):
@@ -117,12 +161,21 @@ class MunicipalAppState:
         self.detector.run_detection_scan()
 
 
-gis_state = MunicipalAppState()
+# Lazy init â€” populated on first request to avoid OOM on cloud startup
+gis_state: MunicipalAppState | None = None
 
 
-# ══════════════════════════════════════════════════════════════════
+def get_gis_state() -> MunicipalAppState:
+    """Return the global GIS state, initialising it on first call."""
+    global gis_state
+    if gis_state is None:
+        gis_state = MunicipalAppState()
+    return gis_state
+
+
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  HELPERS
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def sanitize(val, max_len: int = 200) -> str:
     if not isinstance(val, str):
@@ -147,9 +200,9 @@ def validate_password(pwd: str) -> str | None:
     return None
 
 
-# ══════════════════════════════════════════════════════════════════
-#  AUTH ROUTES — PUBLIC
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+#  AUTH ROUTES â€” PUBLIC
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @app.route("/login", methods=["GET", "POST"])
 def login_page():
@@ -185,7 +238,7 @@ def login_page():
 
 @app.route("/signup", methods=["GET", "POST"])
 def signup_page():
-    """Public self-registration — always creates ROLE_USER accounts."""
+    """Public self-registration â€” always creates ROLE_USER accounts."""
     if current_user.is_authenticated:
         return redirect(url_for("user_dashboard"))
 
@@ -237,9 +290,9 @@ def logout():
     return redirect(url_for("login_page"))
 
 
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  PAGE ROUTES
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def get_host_ip() -> str:
     """Get the best local IP address for LAN access."""
@@ -255,21 +308,21 @@ def get_host_ip() -> str:
 
 @app.route("/connect")
 def connect_page():
-    """Public network connect page — shows QR code + URL for all devices."""
+    """Public network connect page â€” shows QR code + URL for all devices."""
     return render_template("connect.html", host_ip=get_host_ip())
 
 
 @app.route("/")
 @login_required
 def index():
-    """GIS map — accessible to both roles."""
+    """GIS map â€” accessible to both roles."""
     return render_template("index.html", user=current_user)
 
 
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    """Smart redirect: admins → admin dashboard, users → user dashboard."""
+    """Smart redirect: admins â†’ admin dashboard, users â†’ user dashboard."""
     if current_user.is_admin:
         return redirect(url_for("admin_dashboard"))
     return redirect(url_for("user_dashboard"))
@@ -289,9 +342,9 @@ def user_dashboard():
     return render_template("user_dashboard.html", user=current_user)
 
 
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  CURRENT USER API
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @app.route("/api/me", methods=["GET"])
 @login_required
@@ -299,14 +352,14 @@ def get_me():
     return jsonify({"status": "success", "user": current_user.to_dict()})
 
 
-# ══════════════════════════════════════════════════════════════════
-#  USER MANAGEMENT APIS  — ADMIN ONLY
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+#  USER MANAGEMENT APIS  â€” ADMIN ONLY
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @app.route("/api/users", methods=["GET"])
 @login_required
 def get_users():
-    """List users — admin sees all; regular users see only themselves."""
+    """List users â€” admin sees all; regular users see only themselves."""
     if current_user.is_admin:
         page     = request.args.get("page", 1, type=int)
         per_page = min(request.args.get("per_page", 25, type=int), 100)
@@ -378,7 +431,7 @@ def update_user(uid: int):
     """
     Admin may update any field (incl. role/active).
     Regular users may only update their own full_name and password
-    — role changes are silently ignored for non-admins.
+    â€” role changes are silently ignored for non-admins.
     """
     if not current_user.is_admin and current_user.id != uid:
         return jsonify({"status": "error", "message": "Access denied.", "code": 403}), 403
@@ -437,11 +490,11 @@ def delete_user(uid: int):
     return jsonify({"status": "success", "message": f"User '{uname}' deleted."})
 
 
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  PARCEL CRUD APIs
-#  GET  → authenticated users (read)
-#  POST/PUT/DELETE → ADMIN ONLY  (server-side enforcement)
-# ══════════════════════════════════════════════════════════════════
+#  GET  â†’ authenticated users (read)
+#  POST/PUT/DELETE â†’ ADMIN ONLY  (server-side enforcement)
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @app.route("/api/parcels", methods=["GET"])
 @login_required
@@ -478,7 +531,7 @@ def get_parcels_db():
 
 
 @app.route("/api/parcels", methods=["POST"])
-@admin_required                        # ← ADMIN ONLY — enforced server-side
+@admin_required                        # â† ADMIN ONLY â€” enforced server-side
 def create_parcel():
     data = request.get_json() or {}
     for field in ("survey_number", "owner_name", "registered_land_use"):
@@ -532,7 +585,7 @@ def get_parcel_detail(rid: int):
 
 
 @app.route("/api/parcels/<int:rid>", methods=["PUT"])
-@admin_required                        # ← ADMIN ONLY
+@admin_required                        # â† ADMIN ONLY
 def update_parcel(rid: int):
     rec = db.session.get(ParcelRecord, rid)
     if not rec:
@@ -569,7 +622,7 @@ def update_parcel(rid: int):
 
 
 @app.route("/api/parcels/<int:rid>", methods=["DELETE"])
-@admin_required                        # ← ADMIN ONLY
+@admin_required                        # â† ADMIN ONLY
 def delete_parcel(rid: int):
     rec = db.session.get(ParcelRecord, rid)
     if not rec:
@@ -582,11 +635,11 @@ def delete_parcel(rid: int):
     return jsonify({"status": "success", "message": f"Parcel '{pid}' deleted."})
 
 
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  ENCROACHMENT CRUD APIs
-#  GET  → authenticated users
-#  POST/PUT/DELETE → ADMIN ONLY
-# ══════════════════════════════════════════════════════════════════
+#  GET  â†’ authenticated users
+#  POST/PUT/DELETE â†’ ADMIN ONLY
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @app.route("/api/db/encroachments", methods=["GET"])
 @login_required
@@ -710,9 +763,9 @@ def delete_db_encroachment(rid: int):
     return jsonify({"status": "success", "message": "Encroachment record deleted."})
 
 
-# ══════════════════════════════════════════════════════════════════
-#  AUDIT LOG API  — ADMIN ONLY
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+#  AUDIT LOG API  â€” ADMIN ONLY
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @app.route("/api/audit-logs", methods=["GET"])
 @admin_required
@@ -742,9 +795,9 @@ def get_audit_logs():
     })
 
 
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  DASHBOARD STATS API
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @app.route("/api/dashboard-stats", methods=["GET"])
 @login_required
@@ -760,7 +813,7 @@ def dashboard_stats():
     recent_parcels = [r.to_dict() for r in ParcelRecord.query.order_by(ParcelRecord.created_at.desc()).limit(5).all()]
     recent_enc     = [r.to_dict() for r in EncroachmentRecord.query.order_by(EncroachmentRecord.created_at.desc()).limit(5).all()]
 
-    gis_metrics = gis_state.registry.get_metrics_summary()
+    gis_metrics = get_gis_state().registry.get_metrics_summary()
 
     payload = {
         "status": "success",
@@ -778,46 +831,46 @@ def dashboard_stats():
     return jsonify(payload)
 
 
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  EXISTING GIS APIs  (all login_required; GIS scan = admin_required)
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @app.route("/api/cadastre", methods=["GET"])
 @login_required
 def get_cadastre():
-    return jsonify(gis_state.registry.get_parcels_geojson())
+    return jsonify(get_gis_state().registry.get_parcels_geojson())
 
 
 @app.route("/api/structures", methods=["GET"])
 @login_required
 def get_structures():
-    return jsonify(gis_state.registry.get_structures_geojson())
+    return jsonify(get_gis_state().registry.get_structures_geojson())
 
 
 @app.route("/api/encroachments", methods=["GET"])
 @login_required
 def get_encroachments():
-    return jsonify(gis_state.registry.get_encroachments_geojson())
+    return jsonify(get_gis_state().registry.get_encroachments_geojson())
 
 
 @app.route("/api/stats", methods=["GET"])
 @login_required
 def get_stats():
-    return jsonify(gis_state.registry.get_metrics_summary())
+    return jsonify(get_gis_state().registry.get_metrics_summary())
 
 
 @app.route("/api/scan", methods=["POST"])
 @admin_required
 def run_scan():
-    flags = gis_state.detector.run_detection_scan()
+    flags = get_gis_state().detector.run_detection_scan()
     audit(current_user, "SCAN", "system",
-          detail=f"GIS scan — {len(flags)} flags detected", ip=client_ip())
+          detail=f"GIS scan â€” {len(flags)} flags detected", ip=client_ip())
     db.session.commit()
     return jsonify({
         "status": "success",
         "flags_detected": len(flags),
-        "encroachments":  gis_state.registry.get_encroachments_geojson(),
-        "stats":          gis_state.registry.get_metrics_summary(),
+        "encroachments":  get_gis_state().registry.get_encroachments_geojson(),
+        "stats":          get_gis_state().registry.get_metrics_summary(),
     })
 
 
@@ -825,7 +878,7 @@ def run_scan():
 @login_required
 def get_legal_notice(flag_id: str):
     try:
-        notice = gis_state.report_gen.generate_legal_notice(flag_id)
+        notice = get_gis_state().report_gen.generate_legal_notice(flag_id)
         return jsonify({"status": "success", "notice": notice})
     except ValueError as e:
         return jsonify({"status": "error", "message": str(e)}), 404
@@ -834,7 +887,7 @@ def get_legal_notice(flag_id: str):
 @app.route("/api/audit-report", methods=["GET"])
 @login_required
 def get_full_audit():
-    return jsonify(gis_state.report_gen.generate_full_audit_report())
+    return jsonify(get_gis_state().report_gen.generate_full_audit_report())
 
 
 @app.route("/api/analyze-custom-polygon", methods=["POST"])
@@ -844,7 +897,7 @@ def analyze_custom_polygon():
     coords = data.get("coordinates")
     if not coords or len(coords) < 3:
         return jsonify({"status": "error", "message": "Invalid polygon."}), 400
-    result = gis_state.detector.analyze_arbitrary_polygon(coords, data.get("claimed_parcel_id"))
+    result = get_gis_state().detector.analyze_arbitrary_polygon(coords, data.get("claimed_parcel_id"))
     return jsonify({"status": "success", "analysis": result})
 
 
@@ -852,7 +905,7 @@ def analyze_custom_polygon():
 @login_required
 def classify_sample():
     data = request.get_json() or {}
-    result = gis_state.classifier.classify_spectral_profile(
+    result = get_gis_state().classifier.classify_spectral_profile(
         float(data.get("red", 0.25)), float(data.get("green", 0.22)),
         float(data.get("blue", 0.20)), float(data.get("nir", 0.28)),
         float(data.get("swir", 0.40)), float(data.get("texture_variance", 0.14))
@@ -863,7 +916,7 @@ def classify_sample():
 @app.route("/api/classifier-diagnostics", methods=["GET"])
 @login_required
 def classifier_diagnostics():
-    return jsonify(gis_state.classifier.get_model_diagnostics())
+    return jsonify(get_gis_state().classifier.get_model_diagnostics())
 
 
 @app.route("/api/update-flag-status", methods=["POST"])
@@ -872,7 +925,7 @@ def update_flag_status():
     data     = request.get_json() or {}
     flag_id  = data.get("flag_id")
     new_status = data.get("status")
-    flag = gis_state.registry.encroachment_flags.get(flag_id)
+    flag = get_gis_state().registry.encroachment_flags.get(flag_id)
     if not flag:
         return jsonify({"status": "error", "message": "Flag not found."}), 404
     try:
@@ -888,16 +941,637 @@ def update_flag_status():
 @app.route("/api/reset", methods=["POST"])
 @admin_required
 def reset_dataset():
-    gis_state.reset()
+    get_gis_state().reset()
     audit(current_user, "RESET", "system", detail="GIS cadastre reset to baseline", ip=client_ip())
     db.session.commit()
     return jsonify({"status": "success", "message": "Municipal cadastre reset to baseline state."})
 
 
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #  STARTUP (only used when running directly: python run_app.py)
 #  In production, gunicorn imports `app` from this module directly.
-# ══════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  PASSWORD RESET / OTP ROUTES
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    """Step 1: request a reset token via email."""
+    if current_user.is_authenticated:
+        return redirect(url_for("user_dashboard"))
+
+    message = None
+    error   = None
+    if request.method == "POST":
+        identifier = (request.form.get("identifier", "") or "").strip()
+        if not identifier:
+            error = "Please enter your email or username."
+        else:
+            user = User.query.filter(
+                (User.email == identifier.lower()) | (User.username == identifier)
+            ).first()
+            # Always show the same message (don't reveal if account exists)
+            message = "If an account exists, a reset code has been sent to the registered email."
+            if user and user.is_active:
+                with app.app_context():
+                    token = OTPToken.create(user.id, purpose="password_reset", ttl_minutes=15)
+                    db.session.commit()
+                # Try to send email if MAIL_SERVER is configured
+                _send_reset_email(user, token.token)
+                audit(user, "PASSWORD_RESET_REQUESTED", "user",
+                      resource_id=user.id,
+                      detail=f"Password reset requested for {user.email}",
+                      ip=client_ip())
+                db.session.commit()
+    return render_template("forgot_password.html", message=message, error=error)
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token: str):
+    """Step 2: set new password using the token."""
+    if current_user.is_authenticated:
+        return redirect(url_for("user_dashboard"))
+
+    record = OTPToken.query.filter_by(token=token, purpose="password_reset").first()
+    if not record or not record.is_valid:
+        return render_template("reset_password.html", token=token,
+                               error="This reset link is invalid or has expired. Please request a new one.")
+
+    error = None
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        confirm  = request.form.get("confirm_password", "")
+
+        if password != confirm:
+            error = "Passwords do not match."
+        elif (pwd_err := validate_password(password)):
+            error = pwd_err
+        else:
+            record.attempts += 1
+            record.used = True
+            user = db.session.get(User, record.user_id)
+            if not user:
+                error = "User account not found."
+            else:
+                user.set_password(password)
+                audit(user, "PASSWORD_RESET", "user",
+                      resource_id=user.id, detail="Password reset via token", ip=client_ip())
+                db.session.commit()
+                return render_template("reset_password.html", token=token, success=True)
+
+        record.attempts += 1
+        db.session.commit()
+
+    return render_template("reset_password.html", token=token, error=error)
+
+
+@app.route("/api/change-password", methods=["POST"])
+@login_required
+def change_password():
+    """Authenticated users change their own password."""
+    data        = request.get_json() or {}
+    current_pw  = data.get("current_password", "")
+    new_pw      = data.get("new_password", "")
+    confirm_pw  = data.get("confirm_password", "")
+
+    if not current_pw or not new_pw:
+        return jsonify({"status": "error", "message": "Current and new password are required."}), 400
+    if not current_user.check_password(current_pw):
+        return jsonify({"status": "error", "message": "Current password is incorrect."}), 400
+    if new_pw != confirm_pw:
+        return jsonify({"status": "error", "message": "New passwords do not match."}), 400
+    if (pwd_err := validate_password(new_pw)):
+        return jsonify({"status": "error", "message": pwd_err}), 400
+
+    current_user.set_password(new_pw)
+    audit(current_user, "PASSWORD_CHANGED", "user",
+          resource_id=current_user.id, detail="User changed own password", ip=client_ip())
+    db.session.commit()
+    return jsonify({"status": "success", "message": "Password updated successfully."})
+
+
+def _send_reset_email(user, token: str) -> None:
+    """Send a password-reset email if MAIL_SERVER env var is configured."""
+    mail_server = os.environ.get("MAIL_SERVER", "")
+    if not mail_server:
+        print(f"[MAIL] MAIL_SERVER not configured. Token for {user.email}: {token}")
+        return
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        base_url = os.environ.get("APP_BASE_URL", "http://localhost:5000")
+        reset_url = f"{base_url}/reset-password/{token}"
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = "Municipal GIS — Password Reset"
+        msg["From"]    = os.environ.get("MAIL_DEFAULT_SENDER", "noreply@municipal.gov")
+        msg["To"]      = user.email
+
+        body_html = f"""
+        <html><body>
+        <p>Hello {user.full_name or user.username},</p>
+        <p>A password reset was requested for your Municipal GIS account.</p>
+        <p><a href="{reset_url}">Click here to reset your password</a></p>
+        <p>This link expires in 15 minutes. If you did not request this, ignore this email.</p>
+        <p>Reset link: {reset_url}</p>
+        </body></html>"""
+
+        msg.attach(MIMEText(body_html, "html"))
+
+        port = int(os.environ.get("MAIL_PORT", 587))
+        with smtplib.SMTP(mail_server, port) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.login(os.environ.get("MAIL_USERNAME", ""), os.environ.get("MAIL_PASSWORD", ""))
+            smtp.sendmail(msg["From"], user.email, msg.as_string())
+        print(f"[MAIL] Reset email sent to {user.email}")
+    except Exception as exc:
+        print(f"[MAIL] Failed to send email: {exc}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  NOTIFICATION APIs
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/notifications", methods=["GET"])
+@login_required
+def get_notifications():
+    """Get current user's notifications."""
+    page      = request.args.get("page", 1, type=int)
+    per_page  = min(request.args.get("per_page", 20, type=int), 100)
+    unread_only = request.args.get("unread_only", "false").lower() == "true"
+
+    q = Notification.query.filter_by(user_id=current_user.id)
+    if unread_only:
+        q = q.filter_by(is_read=False)
+    q = q.order_by(Notification.created_at.desc())
+    total  = q.count()
+    items  = q.offset((page - 1) * per_page).limit(per_page).all()
+    unread = Notification.query.filter_by(user_id=current_user.id, is_read=False).count()
+    return jsonify({
+        "status":  "success",
+        "total":   total,
+        "unread":  unread,
+        "page":    page,
+        "items":   [n.to_dict() for n in items],
+    })
+
+
+@app.route("/api/notifications/<int:nid>/read", methods=["POST"])
+@login_required
+def mark_notification_read(nid: int):
+    n = Notification.query.filter_by(id=nid, user_id=current_user.id).first()
+    if not n:
+        return jsonify({"status": "error", "message": "Not found."}), 404
+    n.is_read = True
+    db.session.commit()
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/notifications/mark-all-read", methods=["POST"])
+@login_required
+def mark_all_notifications_read():
+    Notification.query.filter_by(user_id=current_user.id, is_read=False).update({"is_read": True})
+    db.session.commit()
+    return jsonify({"status": "success"})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ENCROACHMENT VERIFICATION WORKFLOW
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/db/encroachments/<int:rid>/verify", methods=["POST"])
+@verify_required
+def verify_encroachment(rid: int):
+    """Verify or reject an encroachment case."""
+    rec = db.session.get(EncroachmentRecord, rid)
+    if not rec:
+        return jsonify({"status": "error", "message": "Record not found."}), 404
+
+    data    = request.get_json() or {}
+    action  = data.get("action", "").upper()  # VERIFY or REJECT
+    remarks = sanitize(data.get("remarks", ""), 1000)
+
+    if action not in ("VERIFY", "REJECT"):
+        return jsonify({"status": "error", "message": "action must be VERIFY or REJECT."}), 400
+
+    new_status = "VERIFIED" if action == "VERIFY" else "REJECTED"
+    rec.status           = new_status
+    rec.verified_by_id   = current_user.id
+    rec.verified_at      = datetime.now(timezone.utc)
+    rec.officer_remarks  = remarks
+    rec.updated_at       = datetime.now(timezone.utc)
+
+    audit(current_user, f"ENCROACHMENT_{action}D", "encroachment",
+          resource_id=rid,
+          detail=f"Case {rec.flag_id} -> {new_status}. Remarks: {remarks[:200]}",
+          ip=client_ip())
+
+    # Notify assigned officer
+    if rec.assigned_officer_id:
+        notify(
+            user_id     = rec.assigned_officer_id,
+            title       = f"Case {rec.flag_id} {new_status}",
+            message     = f"Case {rec.flag_id} has been {new_status.lower()} by {current_user.full_name}. {remarks}",
+            notif_type  = "SUCCESS" if action == "VERIFY" else "WARNING",
+            resource    = "encroachment",
+            resource_id = rid,
+        )
+
+    db.session.commit()
+    return jsonify({"status": "success", "encroachment": rec.to_dict()})
+
+
+@app.route("/api/db/encroachments/<int:rid>/assign", methods=["POST"])
+@write_required
+def assign_encroachment(rid: int):
+    """Assign an encroachment case to an officer."""
+    rec = db.session.get(EncroachmentRecord, rid)
+    if not rec:
+        return jsonify({"status": "error", "message": "Record not found."}), 404
+
+    data        = request.get_json() or {}
+    officer_id  = data.get("officer_id")
+
+    if officer_id:
+        officer = db.session.get(User, int(officer_id))
+        if not officer:
+            return jsonify({"status": "error", "message": "Officer not found."}), 404
+        rec.assigned_officer_id = officer.id
+        rec.status = "PENDING_VERIFICATION"
+        rec.updated_at = datetime.now(timezone.utc)
+
+        # Notify the officer
+        notify(
+            user_id     = officer.id,
+            title       = f"Case {rec.flag_id} assigned to you",
+            message     = f"Encroachment case {rec.flag_id} ({rec.encroachment_type}) has been assigned to you for verification.",
+            notif_type  = "INFO",
+            resource    = "encroachment",
+            resource_id = rid,
+        )
+    else:
+        rec.assigned_officer_id = None
+
+    audit(current_user, "CASE_ASSIGNED", "encroachment", resource_id=rid,
+          detail=f"Case {rec.flag_id} assigned to officer_id={officer_id}",
+          ip=client_ip())
+    db.session.commit()
+    return jsonify({"status": "success", "encroachment": rec.to_dict()})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  EVIDENCE FILE UPLOAD & MANAGEMENT
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _get_file_type(ext: str) -> str:
+    ext = ext.lower()
+    if ext in ALLOWED_IMAGE_EXT: return "image"
+    if ext in ALLOWED_GEO_EXT:   return "geodata"
+    return "document"
+
+
+@app.route("/api/evidence", methods=["POST"])
+@login_required
+def upload_evidence():
+    """Upload evidence file and link to an encroachment case."""
+    if "file" not in request.files:
+        return jsonify({"status": "error", "message": "No file provided."}), 400
+
+    f           = request.files["file"]
+    case_id     = request.form.get("case_id", type=int)
+    description = sanitize(request.form.get("description", ""), 500)
+    ev_type     = sanitize(request.form.get("evidence_type", "GENERAL"), 30).upper()
+
+    if not f or not f.filename:
+        return jsonify({"status": "error", "message": "Empty filename."}), 400
+    if not case_id:
+        return jsonify({"status": "error", "message": "case_id is required."}), 400
+
+    rec = db.session.get(EncroachmentRecord, case_id)
+    if not rec:
+        return jsonify({"status": "error", "message": "Encroachment case not found."}), 404
+
+    if not _allowed_file(f.filename):
+        return jsonify({"status": "error",
+                        "message": f"File type not allowed. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"}), 400
+
+    orig_name = secure_filename(f.filename)
+    ext       = orig_name.rsplit(".", 1)[1].lower()
+    new_name  = f"{uuid.uuid4().hex}.{ext}"
+    save_path = os.path.join(app.config["UPLOAD_FOLDER"], new_name)
+
+    try:
+        f.save(save_path)
+        size = os.path.getsize(save_path)
+    except Exception as exc:
+        return jsonify({"status": "error", "message": f"Failed to save file: {exc}"}), 500
+
+    ev = EvidenceFile(
+        case_id         = case_id,
+        filename        = new_name,
+        original_name   = orig_name,
+        file_type       = _get_file_type(ext),
+        mime_type       = f.mimetype,
+        file_size_bytes = size,
+        file_path       = save_path,
+        description     = description,
+        evidence_type   = ev_type,
+        uploaded_by_id  = current_user.id,
+    )
+    db.session.add(ev)
+    db.session.flush()
+
+    audit(current_user, "EVIDENCE_UPLOADED", "evidence", resource_id=ev.id,
+          detail=f"File '{orig_name}' uploaded for case {rec.flag_id}", ip=client_ip())
+    db.session.commit()
+    return jsonify({"status": "success", "evidence": ev.to_dict()}), 201
+
+
+@app.route("/api/evidence/<int:eid>", methods=["DELETE"])
+@write_required
+def delete_evidence(eid: int):
+    ev = db.session.get(EvidenceFile, eid)
+    if not ev:
+        return jsonify({"status": "error", "message": "Not found."}), 404
+    try:
+        if os.path.exists(ev.file_path):
+            os.remove(ev.file_path)
+    except Exception:
+        pass
+    audit(current_user, "EVIDENCE_DELETED", "evidence", resource_id=eid,
+          detail=f"Deleted evidence file '{ev.original_name}'", ip=client_ip())
+    db.session.delete(ev)
+    db.session.commit()
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/evidence/<int:eid>/download")
+@login_required
+def download_evidence(eid: int):
+    ev = db.session.get(EvidenceFile, eid)
+    if not ev:
+        abort(404)
+    if not os.path.exists(ev.file_path):
+        return jsonify({"status": "error", "message": "File not found on server."}), 404
+    return send_file(ev.file_path, as_attachment=True, download_name=ev.original_name)
+
+
+@app.route("/api/evidence/<int:eid>/preview")
+@login_required
+def preview_evidence(eid: int):
+    ev = db.session.get(EvidenceFile, eid)
+    if not ev or ev.file_type != "image":
+        abort(404)
+    if not os.path.exists(ev.file_path):
+        abort(404)
+    return send_file(ev.file_path, mimetype=ev.mime_type or "image/jpeg")
+
+
+@app.route("/api/db/encroachments/<int:rid>/evidence", methods=["GET"])
+@login_required
+def get_case_evidence(rid: int):
+    rec = db.session.get(EncroachmentRecord, rid)
+    if not rec:
+        return jsonify({"status": "error", "message": "Case not found."}), 404
+    files = EvidenceFile.query.filter_by(case_id=rid).order_by(EvidenceFile.created_at.desc()).all()
+    return jsonify({"status": "success", "evidence": [e.to_dict() for e in files]})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  EXPORT APIs  (CSV / GeoJSON)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/export/parcels.csv")
+@login_required
+def export_parcels_csv():
+    records = ParcelRecord.query.order_by(ParcelRecord.created_at.desc()).all()
+    si = StringIO()
+    w  = csv.DictWriter(si, fieldnames=[
+        "parcel_id", "survey_number", "sub_division", "owner_name", "owner_type",
+        "village", "mandal", "district", "state", "zone_name",
+        "registered_land_use", "area_sqm", "latitude", "longitude",
+        "registration_date", "survey_date", "status", "created_at",
+    ])
+    w.writeheader()
+    for r in records:
+        d = r.to_dict()
+        w.writerow({k: d.get(k, "") for k in w.fieldnames})
+    si.seek(0)
+    buf = BytesIO(si.read().encode("utf-8-sig"))  # utf-8-sig = Excel-compatible BOM
+    buf.seek(0)
+    return send_file(buf, mimetype="text/csv", as_attachment=True,
+                     download_name="parcels_export.csv")
+
+
+@app.route("/api/export/encroachments.csv")
+@login_required
+def export_encroachments_csv():
+    records = EncroachmentRecord.query.order_by(EncroachmentRecord.created_at.desc()).all()
+    si = StringIO()
+    w  = csv.DictWriter(si, fieldnames=[
+        "flag_id", "encroachment_type", "severity", "detection_method",
+        "affected_parcel_id", "affected_owner", "village", "mandal", "district",
+        "encroached_area_sqm", "estimated_penalty", "confidence",
+        "status", "assigned_officer", "verified_by", "verified_at",
+        "officer_remarks", "action_taken", "created_at",
+    ])
+    w.writeheader()
+    for r in records:
+        d = r.to_dict()
+        w.writerow({k: d.get(k, "") for k in w.fieldnames})
+    si.seek(0)
+    buf = BytesIO(si.read().encode("utf-8-sig"))
+    buf.seek(0)
+    return send_file(buf, mimetype="text/csv", as_attachment=True,
+                     download_name="encroachments_export.csv")
+
+
+@app.route("/api/export/encroachments.geojson")
+@login_required
+def export_encroachments_geojson():
+    records = EncroachmentRecord.query.filter(
+        EncroachmentRecord.latitude.isnot(None)
+    ).all()
+    features = []
+    for r in records:
+        props = r.to_dict()
+        props.pop("geometry_geojson", None)
+        geom = None
+        if r.geometry_geojson:
+            try:
+                geom = json.loads(r.geometry_geojson)
+            except Exception:
+                pass
+        if not geom and r.latitude and r.longitude:
+            geom = {"type": "Point", "coordinates": [r.longitude, r.latitude]}
+        if geom:
+            features.append({"type": "Feature", "geometry": geom, "properties": props})
+    geojson = {"type": "FeatureCollection", "features": features}
+    buf = BytesIO(json.dumps(geojson, indent=2).encode("utf-8"))
+    buf.seek(0)
+    return send_file(buf, mimetype="application/geo+json", as_attachment=True,
+                     download_name="encroachments.geojson")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  GLOBAL SEARCH API
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/search", methods=["GET"])
+@login_required
+def global_search():
+    """Cross-entity search: parcels, encroachments, users (admin only)."""
+    q_str    = request.args.get("q", "").strip()
+    if len(q_str) < 2:
+        return jsonify({"status": "error", "message": "Query must be at least 2 characters."}), 400
+
+    like = f"%{q_str}%"
+    results = {}
+
+    parcels = ParcelRecord.query.filter(
+        ParcelRecord.parcel_id.ilike(like)     |
+        ParcelRecord.survey_number.ilike(like) |
+        ParcelRecord.owner_name.ilike(like)    |
+        ParcelRecord.village.ilike(like)       |
+        ParcelRecord.mandal.ilike(like)        |
+        ParcelRecord.district.ilike(like)
+    ).limit(10).all()
+    results["parcels"] = [r.to_dict() for r in parcels]
+
+    enc = EncroachmentRecord.query.filter(
+        EncroachmentRecord.flag_id.ilike(like)        |
+        EncroachmentRecord.violator_name.ilike(like)  |
+        EncroachmentRecord.affected_owner.ilike(like) |
+        EncroachmentRecord.affected_parcel_id.ilike(like) |
+        EncroachmentRecord.village.ilike(like)        |
+        EncroachmentRecord.district.ilike(like)
+    ).limit(10).all()
+    results["encroachments"] = [r.to_dict() for r in enc]
+
+    if current_user.is_admin:
+        users = User.query.filter(
+            User.username.ilike(like) |
+            User.full_name.ilike(like) |
+            User.email.ilike(like)
+        ).limit(10).all()
+        results["users"] = [u.to_dict() for u in users]
+
+    return jsonify({"status": "success", "query": q_str, "results": results})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ENHANCED DASHBOARD STATS API
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/dashboard-stats-v2", methods=["GET"])
+@login_required
+def dashboard_stats_v2():
+    """Enhanced stats for dashboard KPI cards and charts."""
+    from sqlalchemy import func
+    total_parcels       = ParcelRecord.query.count()
+    total_area_sqm      = db.session.query(func.sum(ParcelRecord.area_sqm)).scalar() or 0
+    total_encroachments = EncroachmentRecord.query.count()
+    total_users         = User.query.count() if current_user.is_admin else None
+
+    # Status breakdown
+    status_rows = db.session.query(
+        EncroachmentRecord.status, func.count()
+    ).group_by(EncroachmentRecord.status).all()
+    status_breakdown = {r[0]: r[1] for r in status_rows}
+
+    # Severity breakdown
+    sev_rows = db.session.query(
+        EncroachmentRecord.severity, func.count()
+    ).group_by(EncroachmentRecord.severity).all()
+    severity_breakdown = {r[0]: r[1] for r in sev_rows}
+
+    # Type breakdown (top 6)
+    type_rows = db.session.query(
+        EncroachmentRecord.encroachment_type, func.count()
+    ).group_by(EncroachmentRecord.encroachment_type).order_by(func.count().desc()).limit(6).all()
+    type_breakdown = {r[0]: r[1] for r in type_rows}
+
+    # Recent 30-day trend (encroachments by day)
+    from datetime import timedelta
+    thirty_ago = datetime.now(timezone.utc) - timedelta(days=30)
+    trend_rows = db.session.query(
+        func.date(EncroachmentRecord.created_at), func.count()
+    ).filter(EncroachmentRecord.created_at >= thirty_ago
+    ).group_by(func.date(EncroachmentRecord.created_at)).all()
+    trend = {str(r[0]): r[1] for r in trend_rows}
+
+    recent_enc = [r.to_dict() for r in
+                  EncroachmentRecord.query.order_by(
+                      EncroachmentRecord.created_at.desc()).limit(8).all()]
+    recent_parcels = [r.to_dict() for r in
+                      ParcelRecord.query.order_by(
+                          ParcelRecord.created_at.desc()).limit(5).all()]
+
+    gis_metrics = {}
+    try:
+        gis_metrics = get_gis_state().registry.get_metrics_summary()
+    except Exception:
+        pass
+
+    return jsonify({
+        "status": "success",
+        "db_stats": {
+            "total_parcels":         total_parcels,
+            "total_area_sqm":        round(total_area_sqm, 2),
+            "total_encroachments":   total_encroachments,
+            "detected":              status_breakdown.get("DETECTED", 0),
+            "pending_verification":  status_breakdown.get("PENDING_VERIFICATION", 0),
+            "verified":              status_breakdown.get("VERIFIED", 0),
+            "rejected":              status_breakdown.get("REJECTED", 0),
+            "total_users":           total_users,
+            "severity_breakdown":    severity_breakdown,
+            "type_breakdown":        type_breakdown,
+            "status_breakdown":      status_breakdown,
+            "trend_30d":             trend,
+        },
+        "gis_stats":            gis_metrics,
+        "recent_parcels":       recent_parcels,
+        "recent_encroachments": recent_enc,
+    })
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  PROFILE PAGES
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/profile")
+@login_required
+def profile_page():
+    """User profile/settings page."""
+    return render_template("profile.html", user=current_user)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  UTILITY — allowed roles list (for admin user creation form)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/roles", methods=["GET"])
+@login_required
+def get_roles():
+    roles = [
+        {"value": ROLE_ADMIN,       "label": "Administrator",  "description": "Full system access"},
+        {"value": ROLE_GIS_OFFICER, "label": "GIS Officer",    "description": "Manage parcels, verify cases"},
+        {"value": ROLE_SURVEYOR,    "label": "Surveyor",       "description": "Field surveys, verify cases"},
+        {"value": ROLE_VIEWER,      "label": "Viewer",         "description": "Read-only access"},
+    ]
+    return jsonify({"status": "success", "roles": roles})
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
@@ -905,3 +1579,4 @@ if __name__ == "__main__":
     print("[*] Default credentials -> admin / Admin@1234  |  surveyor / Survey@1234")
     print("[*] Signup page -> /signup  |  Connect page -> /connect")
     app.run(host="0.0.0.0", port=port, debug=False)
+
